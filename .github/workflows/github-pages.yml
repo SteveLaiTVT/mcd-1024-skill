@@ -1,0 +1,73 @@
+# 仅发布静态体验页 output/mcd-wheel-static 到 GitHub Pages。
+# 该产物是 build_frontend.mjs 生成的 static 版本：禁用真实 Token 输入与领券，
+# 套餐 / 券 / 活动均为标注采样时间的历史样本，雷达热力图为明确标注的虚构示例。
+# 本工作流不读取任何 secrets；全部 action 固定到官方发布的完整 commit SHA。
+name: Deploy static preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 默认最小权限：构建只需读仓库。写 Pages 与签发 OIDC 令牌仅授予 deploy 作业。
+permissions:
+  contents: read
+
+# Pages 部署不并发：排队等待而不是取消正在进行的发布，避免线上目录被中断。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 测试并构建静态体验页
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      # actions/setup-node v7.1.0；npm 无第三方依赖（无 dependencies、无 lockfile），故不启用缓存
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+
+      - name: 运行 JavaScript 测试
+        run: npm test
+
+      # 不自带 setup-python：仅用 ubuntu-latest 预装的 python3 与标准库
+      - name: 运行 Python 单元测试
+        run: python3 -m unittest discover -s tests
+
+      - name: 校验数据集哈希与样本
+        run: python3 scripts/verify_dataset.py
+
+      - name: 构建前端产物
+        run: npm run build
+
+      # 发布前闸门：版本一致、文件集合精确、无私有文件、无旧版本
+      - name: 校验发布产物
+        run: python3 scripts/package_release.py --check
+
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: output/mcd-wheel-static
+
+  deploy:
+    name: 部署到 GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      # actions/deploy-pages v5.0.1
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346
