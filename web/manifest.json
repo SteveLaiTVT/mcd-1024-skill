@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "麦麦饱饱盘",
+  "version": "2.3.0",
+  "description": "用自己的麦当劳凭证核价，DeepSeek V4.1 Flash 饭搭子结合口味记忆、天气和节令推荐，再揭晓这一餐。",
+  "host_permissions": ["https://mcp.mcd.cn/*", "https://api.deepseek.com/*", "https://api.open-meteo.com/*", "https://geocoding-api.open-meteo.com/*"],
+  "permissions": ["storage"],
+  "background": { "service_worker": "launcher.js" },
+  "action": { "default_title": "打开麦麦饱饱盘" },
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://mcp.mcd.cn https://api.deepseek.com https://api.open-meteo.com https://geocoding-api.open-meteo.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+  }
+}

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#fff8ed">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://mcp.mcd.cn https://api.deepseek.com https://api.open-meteo.com https://geocoding-api.open-meteo.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>麦麦饱饱盘 · 把纠结交给转盘</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="radar.css">
+  <link rel="stylesheet" href="agent.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+<div class="page-shell" id="meal-app">
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-icon" aria-hidden="true">饱</span><span>麦麦饱饱盘<small>MEAL O'CLOCK</small></span></a>
+    <div class="topbar-actions"><button type="button" id="agent-settings-button" class="button button-quiet">AI 搭子与记忆</button><span id="mode-badge" class="mode-badge">体验模式</span><button type="button" id="account-button" class="button button-quiet">连接我的账号 <span aria-hidden="true">↗</span></button></div>
+  </header>
+  <section class="hero">
+    <div><p class="eyebrow"><span class="sun" aria-hidden="true">✳</span> 到饭点了，让选择变简单</p><h1 id="hero-title">今天吃什么？<br><span>转一下，就开饭。</span></h1><p class="hero-description" id="hero-description">人数、食量、预算你来定。<br class="mobile-break">先算好套餐优惠，再把纠结交给转盘。</p></div>
+    <div class="hero-stamp" aria-hidden="true"><span>套餐优先</span><strong>省心<br>又省一点</strong><span>JUST ENOUGH</span></div>
+  </section>
+  <div class="notice" id="mode-notice"><span class="notice-icon" aria-hidden="true">◈</span><p id="mode-note">正在加载体验数据…</p><button class="text-button" type="button" id="connect-inline">用我的券核价 →</button></div>
+  <nav class="view-nav" aria-label="功能切换"><button id="view-wheel" type="button" aria-pressed="true">今天吃什么 <span>套餐圆盘</span></button><button id="view-radar" type="button" aria-pressed="false">麦当劳雷达 <span>我的用餐日历</span></button></nav>
+  <div class="workspace" id="wheel-view">
+    <aside class="setup-column">
+      <section class="card conditions-card" aria-labelledby="conditions-title">
+        <div class="section-heading"><div><p class="eyebrow">01 / 这顿怎么吃</p><h2 id="conditions-title">刚刚好的一餐</h2></div><span class="small-stamp" aria-hidden="true">YOU<br>DECIDE</span></div>
+        <form id="conditions">
+          <fieldset><legend>几个人一起吃？</legend><div class="segmented people-options">
+            <label><input type="radio" name="people" value="1" checked><span>1 人<small>自己吃</small></span></label>
+            <label><input type="radio" name="people" value="2"><span>2 人<small>搭个伴</small></span></label>
+            <label><input type="radio" name="people" value="3"><span>3 人<small>小聚一下</small></span></label>
+            <label><input type="radio" name="people" value="4"><span>4 人<small>一起开饭</small></span></label>
+          </div></fieldset>
+          <fieldset><legend>每个人想吃几分饱？</legend><div class="segmented portion-options">
+            <label><input type="radio" name="portion" value="5"><span><b>5</b> 分<small>轻轻吃 · 1+1</small></span></label>
+            <label><input type="radio" name="portion" value="7" checked><span><b>7</b> 分<small>刚刚好 · 套餐</small></span></label>
+            <label><input type="radio" name="portion" value="9"><span><b>9</b> 分<small>多一点 · 加小食</small></span></label>
+          </div></fieldset>
+          <div class="budget-label"><label for="budget">人均预算</label><span id="budget-total">整顿最多 ¥30</span></div>
+          <div class="budget-input"><span aria-hidden="true">¥</span><input id="budget" type="text" inputmode="decimal" value="30" autocomplete="off" required maxlength="9" aria-describedby="budget-hint"><span>元 / 人</span></div>
+          <div class="budget-shortcuts" aria-label="预算快捷选择"><button type="button" data-budget="20">¥20</button><button type="button" data-budget="30" class="active">¥30</button><button type="button" data-budget="40">¥40</button><button type="button" data-budget="50">¥50</button></div>
+          <p class="field-hint" id="budget-hint">按整顿总价筛选，每个人都有主食。</p>
+          <details class="history-details" id="history-details"><summary>前两天吃过什么？<span id="history-count">可选</span></summary><p class="field-hint" id="history-note">手动选主食，或从麦当劳雷达导入。这次全桌一起避开，仅本页记住。</p><div id="history-options" class="history-chips" aria-label="最近吃过的主食"></div></details>
+          <button id="prepare" class="button button-primary prepare-button" type="submit"><span id="prepare-label">算好价格，生成转盘</span><span aria-hidden="true">→</span></button>
+          <p class="field-hint centered">套餐优先 · 先算优惠 · 再按预算入盘</p>
+        </form>
+      </section>
+      <section class="card wallet-card" aria-labelledby="wallet-title">
+        <div class="section-heading"><div><p class="eyebrow">02 / 把优惠用起来</p><h2 id="wallet-title">我的优惠口袋</h2></div><span class="ticket-icon" aria-hidden="true">券</span></div>
+        <div class="wallet-stats"><div><strong id="owned-count">—</strong><span>已持有</span></div><div><strong id="eligible-count">—</strong><span>本店可核价</span></div><div><strong id="offer-count">—</strong><span>可领种类</span></div></div>
+        <p id="wallet-note" class="field-hint">连接后查询你的券包，领到的券再核实适用范围。</p>
+        <div id="offer-list" class="offer-list"></div>
+        <div class="wallet-actions"><button type="button" id="claim" class="button button-dark" disabled>领取全部可领券</button><button type="button" id="refresh-wallet" class="button button-outline" disabled aria-label="刷新我的券包">刷新</button></div>
+        <p id="claim-message" class="field-hint" role="status" aria-live="polite">体验模式不领取真实优惠券。</p>
+      </section>
+      <p class="privacy-note"><span aria-hidden="true">◇</span> 凭证由你的浏览器保管，业务请求直达麦当劳。</p>
+    </aside>
+    <div class="play-column">
+      <section class="card wheel-card" aria-labelledby="wheel-title">
+        <div class="section-heading"><div><p class="eyebrow">03 / 让今天有点惊喜</p><h2 id="wheel-title">开饭转盘</h2></div><span id="pool-count" class="counter-pill">等待入盘</span></div>
+        <div class="progress-track" id="progress-track" aria-label="优惠准备进度"><span data-step="0">查券</span><i aria-hidden="true"></i><span data-step="1">看活动</span><i aria-hidden="true"></i><span data-step="2">配套餐</span><i aria-hidden="true"></i><span data-step="3">核价格</span></div>
+        <p id="progress" class="progress-text" role="status" aria-live="polite">先选好这顿的条件，就能生成转盘。</p>
+        <div class="wheel-stage">
+          <span class="wheel-doodle doodle-a" aria-hidden="true">✦</span><span class="wheel-doodle doodle-b" aria-hidden="true">＋</span><span class="wheel-doodle doodle-c" aria-hidden="true">✳</span>
+          <div class="wheel-wrap"><div class="wheel-pointer" aria-hidden="true"></div><svg id="wheel" viewBox="0 0 360 360" role="img" aria-label="等待核价的套餐转盘"><g id="rotor"></g></svg><button id="spin" class="spin-button" type="button" disabled><span id="spin-label">待核价</span><small id="spin-subtitle">先算好再转</small></button></div>
+        </div>
+        <div class="wheel-caption"><span class="status-dot" id="wheel-dot" aria-hidden="true"></span><p id="pool-status">预算内的完整套餐，才会出现在这里。</p></div>
+        <p id="wheel-message" class="field-hint centered" role="status" aria-live="polite">每份餐单等概率，同一轮不会重复。</p>
+        <article id="result" class="result-card" hidden aria-live="polite">
+          <div class="result-topline"><span class="result-kicker">这顿就吃它！</span><span id="result-kind" class="tag"></span></div>
+          <h3 id="result-title"></h3>
+          <div class="result-money"><strong id="result-price"></strong><span id="result-per-person"></span></div>
+          <p id="result-packages" class="field-hint"></p><div id="result-parts" class="parts-chips"></div>
+          <p id="result-benefit" class="result-saving"></p><p id="result-disclaimer" class="field-hint"></p>
+          <div class="result-actions"><button id="spin-again" type="button" class="button button-outline">再转一个</button><button id="copy-result" type="button" class="text-button">复制这一餐 ↗</button></div>
+        </article>
+      </section>
+      <section class="card agent-card" aria-labelledby="agent-title">
+        <div class="section-heading"><div><p class="eyebrow">YOUR MEAL COMPANION / 慢慢懂你的口味</p><h2 id="agent-title">给今天挑一顿舒服的饭</h2></div><span class="counter-pill" id="agent-badge">温柔饭搭子</span></div>
+        <p id="agent-intro" class="agent-intro">记住你明确喜欢的味道，也给新口味一点机会。</p>
+        <div class="agent-day" id="agent-day"></div>
+        <div class="agent-context-controls"><label for="agent-mood">今天的心情<select id="agent-mood"><option value="normal">日常，刚刚好</option><option value="comfort">有点累，想被照顾</option><option value="surprise">想来一点惊喜</option><option value="gathering">一起吃，热闹一点</option></select></label><label for="agent-city">天气城市<input id="agent-city" type="text" maxlength="40" autocomplete="off" placeholder="城市，例如深圳"></label><button type="button" class="button button-outline" id="agent-weather">查城市天气</button></div>
+        <p class="field-hint" id="agent-weather-note" role="status" aria-live="polite">选择城市后读取 Open-Meteo 天气；只查询城市，不读取精确定位。</p>
+        <div id="agent-city-choices" class="agent-city-choices"></div>
+        <div class="agent-run-actions"><button id="agent-run" type="button" class="button button-dark">让 AI 搭子挑一份 →</button><button id="agent-local" type="button" class="button button-outline">用本地偏好挑选</button><button id="agent-cancel" type="button" class="text-button" hidden>取消这次推荐</button></div>
+        <p id="agent-status" class="field-hint" role="status" aria-live="polite">先算好价格，再在这一池餐单里挑选。</p>
+        <p class="field-hint agent-data-note">点击 AI 推荐会把当前候选餐单、口味偏好、反馈摘要和已读城市天气发送给 DeepSeek；每次最多两轮，费用由你的 API 账户承担。McD Token、地址簿和订单明细留在本页。</p>
+        <div id="agent-results" class="agent-results"></div>
+        <div id="agent-feedback" class="agent-feedback" hidden><strong id="agent-feedback-title"></strong><div><button id="agent-like" type="button" class="button button-outline" aria-pressed="false">♡ 喜欢这份</button><button id="agent-less" type="button" class="text-button" aria-pressed="false">以后少推荐</button></div><p id="agent-feedback-note" class="field-hint">只记录你主动给的反馈，揭晓餐单不会自动记成吃过。</p></div>
+      </section>
+      <section id="pricing" class="card pricing-card" hidden aria-labelledby="pricing-title">
+        <div class="section-heading"><div><p class="eyebrow">先算清楚，再放心转</p><h2 id="pricing-title">这一餐，价格算好了</h2></div><span id="quote-time" class="tag"></span></div>
+        <p id="price-summary" class="price-summary"></p>
+        <div id="plan-list" class="plan-list" aria-label="套餐价格比较"></div>
+        <p id="comparison-note" class="field-hint"></p>
+        <details class="information-details"><summary>优惠券适用范围 <span id="benefit-count"></span></summary><div class="table-scroll"><table><caption class="sr-only">持有券的商品范围、有效期与核价状态</caption><thead><tr><th>优惠券</th><th>适用范围与条件</th><th>状态</th></tr></thead><tbody id="benefit-rows"></tbody></table></div></details>
+        <details class="information-details" id="calendar-details"><summary>活动信息表 <span id="calendar-summary"></span></summary><div class="table-scroll"><table><caption class="sr-only">活动日期与计价依据</caption><thead><tr><th>活动 / 日期</th><th>范围与条件</th><th>计价依据</th></tr></thead><tbody id="calendar-rows"></tbody></table></div></details>
+      </section>
+    </div>
+  </div>
+  <section id="radar-view" class="radar-view" hidden aria-labelledby="radar-title">
+    <div class="card radar-calendar-card">
+      <div class="radar-heading"><div><p class="eyebrow">MEAL MEMORIES / 每一餐都有迹可循</p><h2 id="radar-title">你的麦当劳日历</h2><p class="radar-description">像翻看一张生活地图，回看哪天点了什么。</p></div><span class="counter-pill" id="radar-source">等待读取</span></div>
+      <div class="radar-actions"><button type="button" id="radar-load" class="button button-dark">连接账号，读取历史</button><button type="button" id="radar-demo" class="text-button">先看虚构示例 ↗</button><span class="radar-memory-note">仅本页内存 · 断开即清除</span></div>
+      <p id="radar-message" class="radar-message" role="status" aria-live="polite"></p>
+      <div class="radar-stats"><div><strong id="radar-order-count">—</strong><span>当前范围完成订单</span></div><div><strong id="radar-date-count">—</strong><span>有记录的日期</span></div><div><strong id="radar-food-count">—</strong><span>记录中的餐品种类</span></div><div><strong class="radar-favorite" id="radar-favorite">等你点亮</strong><span>这段记录里常点的</span></div></div>
+      <div class="radar-calendar-toolbar"><div class="radar-range-buttons"><button type="button" id="radar-annual" aria-pressed="true">全年日历</button><button type="button" id="radar-recent" aria-pressed="false">近 12 周</button></div><label class="radar-year-label">年份<select id="radar-year" aria-label="热力图年份"></select></label></div>
+      <div class="radar-map" id="radar-map"><div class="radar-weekday-labels" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="radar-map-scroll"><div class="radar-months" id="radar-months" aria-hidden="true"></div><div class="radar-grid" id="radar-grid" aria-label="完成订单热力图"></div></div></div>
+      <div class="radar-calendar-caption"><span id="radar-range-label"></span><div class="radar-legend" aria-label="颜色深浅表示每天已完成订单数"><span>少</span><i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i><span>多</span></div></div>
+      <p class="field-hint radar-coverage-hint">斜线格表示未返回记录，不能判断当天是否用餐；浅灰格是未来日期。格子可点击，也可用方向键浏览。</p><p class="field-hint" id="radar-note"></p>
+    </div>
+    <div class="radar-bottom-grid">
+      <section class="card radar-day-card" aria-labelledby="radar-day-title"><div class="section-heading"><div><p class="eyebrow">点开一天，回看那一餐</p><h2 id="radar-day-title">选择一个日期</h2></div><span class="tag" id="radar-day-count">没有返回记录</span></div><div id="radar-orders" class="radar-orders"></div><p id="radar-empty-day" class="radar-empty-day">读取历史后，点击有颜色的格子回看那天的套餐。</p></section>
+      <section class="card radar-food-card" aria-labelledby="radar-food-title"><p class="eyebrow">这一段的熟悉味道</p><h2 id="radar-food-title">常点餐品</h2><p class="field-hint">按包含该餐品的已读完成订单数统计。</p><ol id="radar-top-foods" class="radar-top-foods"></ol><p id="radar-no-foods" class="field-hint">读取记录后，看看哪些味道经常出现。</p><div class="radar-recent-foods"><h3>这次想换换口味？</h3><p id="radar-recent-note" class="field-hint"></p><button type="button" id="radar-apply" class="button button-outline" disabled>把前两天主食加入避开项 →</button></div></section>
+    </div>
+  </section>
+  <footer class="footer"><span>麦麦饱饱盘 · 把饭点变成一点小惊喜</span><p>参赛者独立开发，非麦当劳官方产品。套餐推荐仅到店取餐；5 / 7 / 9 分是食量偏好。最终价格与供应以麦当劳为准。</p></footer>
+</div>
+<dialog id="account-dialog" class="account-dialog" aria-labelledby="account-title">
+  <div class="dialog-top"><span class="eyebrow">YOUR ACCOUNT, YOUR BROWSER</span><button id="close-account" class="icon-button" type="button" aria-label="关闭账号面板">×</button></div>
+  <h2 id="account-title">用自己的券，<br>算自己的这一餐。</h2><p class="dialog-description">Token 直接发送给麦当劳，凭证由你的浏览器保管，券包只在本页使用。</p>
+  <p id="transport-note" class="transport-note"></p>
+  <label class="remember-choice" for="remember-account"><input id="remember-account" type="checkbox" aria-describedby="remember-note"><span>在这个浏览器长期记住凭证</span></label>
+  <p id="remember-note" class="field-hint">自行勾选后保存在本机，刷新或重开自动连接；不跨设备同步。取消勾选会删除已保存凭证。</p>
+  <p id="remember-status" class="field-hint" role="status" aria-live="polite"></p>
+  <form id="connect-form"><label for="token">麦当劳 MCP Token</label><div class="token-field"><input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴你的 Token" required aria-describedby="token-privacy"><button id="reveal-token" class="text-button" type="button" aria-label="显示 Token">显示</button></div><p id="token-privacy" class="field-hint">Token 只发送给麦当劳。未勾选记住凭证时，仅当前页面保留。</p><button id="connect" class="button button-primary" type="submit">连接麦当劳 →</button></form>
+  <div id="connected-actions" hidden><p class="connected-message">✓ 已直连麦当劳</p><button id="disconnect" class="button button-outline" type="button">断开并清除已保存凭证</button></div>
+  <div class="saved-account-actions"><button id="retry-saved" class="text-button" type="button" hidden>用已保存凭证重新连接</button><button id="forget-account" class="text-button" type="button" hidden>清除已保存凭证</button></div>
+  <p id="connect-message" class="field-hint" role="status" aria-live="polite"></p>
+  <div id="store-settings" hidden><div class="dialog-divider"></div><h3>选择到店取餐门店</h3><div id="selected-store" class="selected-store" hidden><strong id="selected-store-name"></strong><p id="selected-store-status" class="field-hint"></p></div><form id="store-search"><div class="store-search-fields"><label>城市<input id="store-city" type="text" value="深圳" maxlength="40" required></label><label>位置、地址或门店名称<input id="store-keyword" type="text" value="华强北" maxlength="300" required></label></div><button id="search-stores" type="submit" class="button button-outline">查找附近门店</button></form><button id="load-addresses" type="button" class="text-button address-button">选择麦当劳已保存的地址 ↗</button><p id="address-message" class="field-hint" role="status" aria-live="polite">主动读取后，选一条地址作为搜索位置；地址簿仅在本页显示。</p><div id="address-results" class="store-results address-results"></div><p id="store-search-message" class="field-hint" role="status" aria-live="polite">门店由麦当劳按搜索位置返回。选择营业中的门店后再核价，也可随时换店。</p><div id="store-results" class="store-results"></div></div>
+  <div class="dialog-bottom"><a href="https://open.mcd.cn/mcp" target="_blank" rel="noopener noreferrer">去官方申请 Token ↗</a><button id="use-demo" class="text-button" type="button">先体验一下</button></div>
+</dialog>
+<dialog id="claim-dialog" class="account-dialog claim-dialog" aria-labelledby="claim-title"><div class="dialog-top"><span class="eyebrow">领取后重新核价</span><button id="close-claim" class="icon-button" type="button" aria-label="关闭领券确认">×</button></div><h2 id="claim-title">领取全部当前可领券？</h2><p>麦当劳会一次领取当前账号全部可领券。领券后，这页会刷新券包、门店范围和套餐价格。</p><p class="field-hint">不支持指定单张；不会下单或付款。</p><div class="claim-dialog-actions"><button id="confirm-claim" type="button" class="button button-primary">确认领取全部并重新核价</button><button id="cancel-claim" type="button" class="button button-outline">暂时不领</button></div></dialog>
+<dialog id="agent-dialog" class="account-dialog agent-dialog" aria-labelledby="agent-dialog-title">
+  <div class="dialog-top"><span class="eyebrow">A LITTLE MORE YOU / 懂你一点点</span><button id="agent-close" type="button" class="icon-button" aria-label="关闭 AI 搭子设置">×</button></div>
+  <h2 id="agent-dialog-title">你的口味，<br>你的 AI 饭搭子。</h2><p class="dialog-description">DeepSeek V4.1 Flash · 推荐 Agent 负责懂你，优化 Agent 复核搭配与当前候选价格。</p>
+  <form id="deepseek-form"><label for="deepseek-token">DeepSeek API key</label><div class="token-field"><input id="deepseek-token" type="password" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴你的 DeepSeek API key"><button id="deepseek-reveal" class="text-button" type="button">显示</button></div><label class="remember-choice" for="deepseek-remember"><input id="deepseek-remember" type="checkbox"><span>在这个浏览器长期记住 DeepSeek 凭证</span></label><p class="field-hint">与你的麦当劳凭证分开保管，默认仅本页使用。取消勾选删除保存记录；刷新恢复配置后，点击推荐才请求模型。</p><div class="agent-key-actions"><button id="deepseek-use" type="submit" class="button button-dark">使用这个 key</button><button id="deepseek-forget" type="button" class="text-button" hidden>停用并清除 DeepSeek 凭证</button><a class="text-button" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">去官方创建 key ↗</a></div></form>
+  <p id="deepseek-status" class="field-hint" role="status" aria-live="polite">模型标识 deepseek-flash；填写后点击推荐验证，不会自动调用。</p>
+  <div class="dialog-divider"></div>
+  <form id="agent-preferences"><div class="agent-settings-grid"><label for="agent-persona">搭子风格<select id="agent-persona"><option value="cozy">温柔饭搭子</option><option value="frugal">精打细算派</option><option value="playful">惊喜探索家</option></select></label><label for="agent-goal">这顿的目标<select id="agent-goal"><option value="balanced">合我口味，舒服一点</option><option value="cheapest">候选池里尽量省钱</option><option value="variety">换个新口味</option></select></label></div>
+    <label for="agent-mode">谁来帮忙<select id="agent-mode"><option value="team">双 Agent 协作 · 推荐后复核，最多 2 轮</option><option value="recommend">推荐 Agent · 口味和心情，1 轮</option><option value="optimize">优化 Agent · 按目标比较，1 轮</option></select></label>
+    <label for="agent-personal-prompt">想让搭子记住的口味<textarea id="agent-personal-prompt" maxlength="600" rows="3" placeholder="例如：喜欢鸡肉，偶尔想吃牛肉；希望语气轻松一点，给我一点小惊喜。"></textarea></label>
+    <label class="remember-choice" for="agent-use-weather"><input id="agent-use-weather" type="checkbox" checked><span>结合已选择城市的天气</span></label>
+    <label class="remember-choice" for="agent-remember-memory"><input id="agent-remember-memory" type="checkbox"><span>在这个浏览器长期记住明确的口味反馈</span></label><p class="field-hint">保存偏好后生效。关闭并保存会清除长期反馈，后续仅本页使用。最多保留 80 条反馈，旧偏好逐渐减弱；不会把推荐当成已消费。</p>
+    <details class="agent-prompt-details"><summary>调整两个 Agent 的提示词</summary><label for="agent-recommend-prompt">推荐 Agent prompt<textarea id="agent-recommend-prompt" maxlength="1200" rows="4"></textarea></label><label for="agent-optimize-prompt">优化 Agent prompt<textarea id="agent-optimize-prompt" maxlength="1200" rows="4"></textarea></label><button id="agent-reset-prompts" type="button" class="text-button">恢复推荐提示词</button></details>
+    <button id="agent-save" type="submit" class="button button-primary">保存我的搭子偏好 →</button><p id="agent-save-status" class="field-hint" role="status" aria-live="polite"></p>
+  </form>
+  <div class="dialog-divider"></div><div class="agent-memory-heading"><h3>搭子记住了什么</h3><button id="agent-clear-memory" type="button" class="text-button">清空反馈记忆</button></div><p id="agent-memory-status" class="field-hint"></p><div id="agent-memory-list" class="agent-memory-list"></div>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
