@@ -1,0 +1,2081 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-10T16:40:04+08:00",
+  "source": "https://mcp.mcd.cn",
+  "kind": "official-whole-cart-quote-snapshot",
+  "context": {
+    "storeCode": "1421180",
+    "storeName": "麦当劳深圳华强北茂业餐厅",
+    "orderType": 1,
+    "beType": 1,
+    "timezone": "Asia/Shanghai",
+    "scope": "explicit sample store; not user location"
+  },
+  "amountUnit": "fen",
+  "currency": "CNY",
+  "plans": [
+    {
+      "id": "fish-light-1",
+      "people": 1,
+      "portion": 5,
+      "title": "麦香鱼随心配",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "1+1随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 1490,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "fish-full-1",
+      "people": 1,
+      "portion": 9,
+      "title": "麦香鱼双份随心配搭配",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "双份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 1
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 2880,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "cheese-light-1",
+      "people": 1,
+      "portion": 5,
+      "title": "双层吉士随心配",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "1+1随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 1490,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "cheese-full-1",
+      "people": 1,
+      "portion": 9,
+      "title": "双层吉士双份随心配搭配",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "双份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 1
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 2880,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "chicken-light-1",
+      "people": 1,
+      "portion": 5,
+      "title": "麦香鸡随心配",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "1+1随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 1390,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "chicken-full-1",
+      "people": 1,
+      "portion": 9,
+      "title": "麦香鸡双份随心配搭配",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "双份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 1
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 2780,
+      "quotedAt": "2026-10-10 16:39:17"
+    },
+    {
+      "id": "chicken-normal-1",
+      "people": 1,
+      "portion": 7,
+      "title": "麦香鸡中套餐",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "三件套餐",
+      "packages": [
+        {
+          "productCode": "9900005453",
+          "name": "麦香鸡中套餐",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 2800,
+      "quotedAt": "2026-10-10 16:39:18"
+    },
+    {
+      "id": "spicy-normal-1",
+      "people": 1,
+      "portion": 7,
+      "title": "麦辣鸡腿汉堡三件套",
+      "wheelTitle": "麦辣鸡腿",
+      "wheelKind": "三件套餐",
+      "packages": [
+        {
+          "productCode": "9900005456",
+          "name": "麦辣鸡腿汉堡三件套",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1440"
+      ],
+      "priceFen": 3350,
+      "quotedAt": "2026-10-10 16:39:31"
+    },
+    {
+      "id": "grilled-normal-1",
+      "people": 1,
+      "portion": 7,
+      "title": "板烧鸡腿堡三件套",
+      "wheelTitle": "板烧鸡腿",
+      "wheelKind": "三件套餐",
+      "packages": [
+        {
+          "productCode": "9900005462",
+          "name": "板烧鸡腿堡三件套",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1406"
+      ],
+      "priceFen": 3450,
+      "quotedAt": "2026-10-10 16:39:19"
+    },
+    {
+      "id": "bigvalue-normal-1",
+      "people": 1,
+      "portion": 7,
+      "title": "大堡口福三件套",
+      "wheelTitle": "大堡口福",
+      "wheelKind": "三件套餐",
+      "packages": [
+        {
+          "productCode": "9900015602",
+          "name": "大堡口福三件套",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "521147",
+          "name": "Hold不住鸡排堡（椒盐风味）",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "521147"
+      ],
+      "priceFen": 2290,
+      "quotedAt": "2026-10-10 16:39:20"
+    },
+    {
+      "id": "crispy-normal-1",
+      "people": 1,
+      "portion": 7,
+      "title": "酥脆无双套餐",
+      "wheelTitle": "酥脆无双",
+      "wheelKind": "三件套餐",
+      "packages": [
+        {
+          "productCode": "9900011126",
+          "name": "酥脆无双套餐",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "505416",
+          "name": "麦麦脆汁鸡-琵琶腿",
+          "quantity": 1
+        },
+        {
+          "code": "504643",
+          "name": "迷你薯条",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "505416"
+      ],
+      "priceFen": 2000,
+      "quotedAt": "2026-10-10 16:39:28"
+    },
+    {
+      "id": "fish-light-2",
+      "people": 2,
+      "portion": 5,
+      "title": "2人 · 麦香鱼随心配 × 2份",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "2份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 2980,
+      "quotedAt": "2026-10-10 16:39:31"
+    },
+    {
+      "id": "fish-full-2",
+      "people": 2,
+      "portion": 9,
+      "title": "2人 · 麦香鱼双份随心配搭配",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "2人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 2
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 5760,
+      "quotedAt": "2026-10-10 16:39:32"
+    },
+    {
+      "id": "cheese-light-2",
+      "people": 2,
+      "portion": 5,
+      "title": "2人 · 双层吉士随心配 × 2份",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "2份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 2980,
+      "quotedAt": "2026-10-10 16:39:32"
+    },
+    {
+      "id": "cheese-full-2",
+      "people": 2,
+      "portion": 9,
+      "title": "2人 · 双层吉士双份随心配搭配",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "2人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 2
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 5760,
+      "quotedAt": "2026-10-10 16:39:32"
+    },
+    {
+      "id": "chicken-light-2",
+      "people": 2,
+      "portion": 5,
+      "title": "2人 · 麦香鸡随心配 × 2份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "2份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 2780,
+      "quotedAt": "2026-10-10 16:39:32"
+    },
+    {
+      "id": "chicken-full-2",
+      "people": 2,
+      "portion": 9,
+      "title": "2人 · 麦香鸡双份随心配搭配",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "2人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 2
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 5560,
+      "quotedAt": "2026-10-10 16:39:32"
+    },
+    {
+      "id": "chicken-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "2人 · 麦香鸡中套餐 × 2份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "2份三件套",
+      "packages": [
+        {
+          "productCode": "9900005453",
+          "name": "麦香鸡中套餐",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 2
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 5600,
+      "quotedAt": "2026-10-10 16:39:33"
+    },
+    {
+      "id": "spicy-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "2人 · 麦辣鸡腿汉堡三件套 × 2份",
+      "wheelTitle": "麦辣鸡腿",
+      "wheelKind": "2份三件套",
+      "packages": [
+        {
+          "productCode": "9900005456",
+          "name": "麦辣鸡腿汉堡三件套",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 2
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1440"
+      ],
+      "priceFen": 6700,
+      "quotedAt": "2026-10-10 16:39:33"
+    },
+    {
+      "id": "grilled-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "2人 · 板烧鸡腿堡三件套 × 2份",
+      "wheelTitle": "板烧鸡腿",
+      "wheelKind": "2份三件套",
+      "packages": [
+        {
+          "productCode": "9900005462",
+          "name": "板烧鸡腿堡三件套",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 2
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1406"
+      ],
+      "priceFen": 6900,
+      "quotedAt": "2026-10-10 16:39:33"
+    },
+    {
+      "id": "bigvalue-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "2人 · 大堡口福三件套 × 2份",
+      "wheelTitle": "大堡口福",
+      "wheelKind": "2份三件套",
+      "packages": [
+        {
+          "productCode": "9900015602",
+          "name": "大堡口福三件套",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "521147",
+          "name": "Hold不住鸡排堡（椒盐风味）",
+          "quantity": 2
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "521147"
+      ],
+      "priceFen": 4580,
+      "quotedAt": "2026-10-10 16:39:34"
+    },
+    {
+      "id": "crispy-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "2人 · 酥脆无双套餐 × 2份",
+      "wheelTitle": "酥脆无双",
+      "wheelKind": "2份三件套",
+      "packages": [
+        {
+          "productCode": "9900011126",
+          "name": "酥脆无双套餐",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "505416",
+          "name": "麦麦脆汁鸡-琵琶腿",
+          "quantity": 2
+        },
+        {
+          "code": "504643",
+          "name": "迷你薯条",
+          "quantity": 2
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "505416"
+      ],
+      "priceFen": 4000,
+      "quotedAt": "2026-10-10 16:39:34"
+    },
+    {
+      "id": "fish-light-3",
+      "people": 3,
+      "portion": 5,
+      "title": "3人 · 麦香鱼随心配 × 3份",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "3份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 4470,
+      "quotedAt": "2026-10-10 16:39:34"
+    },
+    {
+      "id": "fish-full-3",
+      "people": 3,
+      "portion": 9,
+      "title": "3人 · 麦香鱼双份随心配搭配",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "3人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 3
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 8640,
+      "quotedAt": "2026-10-10 16:39:37"
+    },
+    {
+      "id": "cheese-light-3",
+      "people": 3,
+      "portion": 5,
+      "title": "3人 · 双层吉士随心配 × 3份",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "3份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 4470,
+      "quotedAt": "2026-10-10 16:39:37"
+    },
+    {
+      "id": "cheese-full-3",
+      "people": 3,
+      "portion": 9,
+      "title": "3人 · 双层吉士双份随心配搭配",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "3人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 3
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 8640,
+      "quotedAt": "2026-10-10 16:39:37"
+    },
+    {
+      "id": "chicken-light-3",
+      "people": 3,
+      "portion": 5,
+      "title": "3人 · 麦香鸡随心配 × 3份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "3份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 4170,
+      "quotedAt": "2026-10-10 16:39:37"
+    },
+    {
+      "id": "chicken-full-3",
+      "people": 3,
+      "portion": 9,
+      "title": "3人 · 麦香鸡双份随心配搭配",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "3人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 3
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 8340,
+      "quotedAt": "2026-10-10 16:39:40"
+    },
+    {
+      "id": "chicken-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 麦香鸡中套餐 × 3份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "3份三件套",
+      "packages": [
+        {
+          "productCode": "9900005453",
+          "name": "麦香鸡中套餐",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 3
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 3
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 8400,
+      "quotedAt": "2026-10-10 16:39:44"
+    },
+    {
+      "id": "spicy-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 麦辣鸡腿汉堡三件套 × 3份",
+      "wheelTitle": "麦辣鸡腿",
+      "wheelKind": "3份三件套",
+      "packages": [
+        {
+          "productCode": "9900005456",
+          "name": "麦辣鸡腿汉堡三件套",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 3
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 3
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1440"
+      ],
+      "priceFen": 10050,
+      "quotedAt": "2026-10-10 16:39:48"
+    },
+    {
+      "id": "grilled-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 板烧鸡腿堡三件套 × 3份",
+      "wheelTitle": "板烧鸡腿",
+      "wheelKind": "3份三件套",
+      "packages": [
+        {
+          "productCode": "9900005462",
+          "name": "板烧鸡腿堡三件套",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 3
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 3
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "1406"
+      ],
+      "priceFen": 10350,
+      "quotedAt": "2026-10-10 16:39:48"
+    },
+    {
+      "id": "bigvalue-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 大堡口福三件套 × 3份",
+      "wheelTitle": "大堡口福",
+      "wheelKind": "3份三件套",
+      "packages": [
+        {
+          "productCode": "9900015602",
+          "name": "大堡口福三件套",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "521147",
+          "name": "Hold不住鸡排堡（椒盐风味）",
+          "quantity": 3
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 3
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "521147"
+      ],
+      "priceFen": 6870,
+      "quotedAt": "2026-10-10 16:39:48"
+    },
+    {
+      "id": "crispy-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 酥脆无双套餐 × 3份",
+      "wheelTitle": "酥脆无双",
+      "wheelKind": "3份三件套",
+      "packages": [
+        {
+          "productCode": "9900011126",
+          "name": "酥脆无双套餐",
+          "quantity": 3
+        }
+      ],
+      "parts": [
+        {
+          "code": "505416",
+          "name": "麦麦脆汁鸡-琵琶腿",
+          "quantity": 3
+        },
+        {
+          "code": "504643",
+          "name": "迷你薯条",
+          "quantity": 3
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 3
+        }
+      ],
+      "mainCodes": [
+        "505416"
+      ],
+      "priceFen": 6000,
+      "quotedAt": "2026-10-10 16:39:48"
+    },
+    {
+      "id": "fish-light-4",
+      "people": 4,
+      "portion": 5,
+      "title": "4人 · 麦香鱼随心配 × 4份",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "4份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 5960,
+      "quotedAt": "2026-10-10 16:39:48"
+    },
+    {
+      "id": "fish-full-4",
+      "people": 4,
+      "portion": 9,
+      "title": "4人 · 麦香鱼双份随心配搭配",
+      "wheelTitle": "麦香鱼",
+      "wheelKind": "4人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1600",
+          "name": "麦香鱼",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 4
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1600"
+      ],
+      "priceFen": 11520,
+      "quotedAt": "2026-10-10 16:39:52"
+    },
+    {
+      "id": "cheese-light-4",
+      "people": 4,
+      "portion": 5,
+      "title": "4人 · 双层吉士随心配 × 4份",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "4份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 5960,
+      "quotedAt": "2026-10-10 16:39:57"
+    },
+    {
+      "id": "cheese-full-4",
+      "people": 4,
+      "portion": 9,
+      "title": "4人 · 双层吉士双份随心配搭配",
+      "wheelTitle": "双层吉士",
+      "wheelKind": "4人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1120",
+          "name": "双层吉士汉堡",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 4
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1120"
+      ],
+      "priceFen": 11520,
+      "quotedAt": "2026-10-10 16:39:55"
+    },
+    {
+      "id": "chicken-light-4",
+      "people": 4,
+      "portion": 5,
+      "title": "4人 · 麦香鸡随心配 × 4份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "4份随心配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 5560,
+      "quotedAt": "2026-10-10 16:39:56"
+    },
+    {
+      "id": "chicken-full-4",
+      "people": 4,
+      "portion": 9,
+      "title": "4人 · 麦香鸡双份随心配搭配",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "4人双份搭配",
+      "packages": [
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 4
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 11120,
+      "quotedAt": "2026-10-10 16:39:56"
+    },
+    {
+      "id": "chicken-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 麦香鸡中套餐 × 4份",
+      "wheelTitle": "麦香鸡",
+      "wheelKind": "4份三件套",
+      "packages": [
+        {
+          "productCode": "9900005453",
+          "name": "麦香鸡中套餐",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 4
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 4
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1450"
+      ],
+      "priceFen": 11200,
+      "quotedAt": "2026-10-10 16:39:56"
+    },
+    {
+      "id": "spicy-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 麦辣鸡腿汉堡三件套 × 4份",
+      "wheelTitle": "麦辣鸡腿",
+      "wheelKind": "4份三件套",
+      "packages": [
+        {
+          "productCode": "9900005456",
+          "name": "麦辣鸡腿汉堡三件套",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 4
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 4
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1440"
+      ],
+      "priceFen": 13400,
+      "quotedAt": "2026-10-10 16:39:57"
+    },
+    {
+      "id": "grilled-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 板烧鸡腿堡三件套 × 4份",
+      "wheelTitle": "板烧鸡腿",
+      "wheelKind": "4份三件套",
+      "packages": [
+        {
+          "productCode": "9900005462",
+          "name": "板烧鸡腿堡三件套",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 4
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 4
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1406"
+      ],
+      "priceFen": 13800,
+      "quotedAt": "2026-10-10 16:39:57"
+    },
+    {
+      "id": "bigvalue-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 大堡口福三件套 × 4份",
+      "wheelTitle": "大堡口福",
+      "wheelKind": "4份三件套",
+      "packages": [
+        {
+          "productCode": "9900015602",
+          "name": "大堡口福三件套",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "521147",
+          "name": "Hold不住鸡排堡（椒盐风味）",
+          "quantity": 4
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 4
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "521147"
+      ],
+      "priceFen": 9160,
+      "quotedAt": "2026-10-10 16:39:57"
+    },
+    {
+      "id": "crispy-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 酥脆无双套餐 × 4份",
+      "wheelTitle": "酥脆无双",
+      "wheelKind": "4份三件套",
+      "packages": [
+        {
+          "productCode": "9900011126",
+          "name": "酥脆无双套餐",
+          "quantity": 4
+        }
+      ],
+      "parts": [
+        {
+          "code": "505416",
+          "name": "麦麦脆汁鸡-琵琶腿",
+          "quantity": 4
+        },
+        {
+          "code": "504643",
+          "name": "迷你薯条",
+          "quantity": 4
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "505416"
+      ],
+      "priceFen": 8000,
+      "quotedAt": "2026-10-10 16:39:57"
+    },
+    {
+      "id": "weekend-normal-2",
+      "people": 2,
+      "portion": 7,
+      "title": "麦麦周末双人餐",
+      "wheelTitle": "周末分享餐",
+      "wheelKind": "2人套餐",
+      "packages": [
+        {
+          "productCode": "9900015151",
+          "name": "麦麦周末双人餐",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "521730",
+          "name": "枫糖风味厚松饼猪柳蛋堡",
+          "quantity": 1
+        },
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "521741",
+          "name": "脆薯饼",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 1
+        },
+        {
+          "code": "520689",
+          "name": "小杯鲜萃咖啡",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "521730",
+        "1440"
+      ],
+      "priceFen": 4990,
+      "quotedAt": "2026-10-10 16:39:58"
+    },
+    {
+      "id": "bff-full-2",
+      "people": 2,
+      "portion": 9,
+      "title": "BFF四宫格小食盘双人餐",
+      "wheelTitle": "BFF分享餐",
+      "wheelKind": "2人套餐",
+      "packages": [
+        {
+          "productCode": "9900005321",
+          "name": "BFF四宫格小食盘双人餐",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 1
+        },
+        {
+          "code": "516020",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "516014",
+          "name": "麦乐鸡-5块",
+          "quantity": 1
+        },
+        {
+          "code": "520450",
+          "name": "薄皮焦香V翅",
+          "quantity": 1
+        },
+        {
+          "code": "516013",
+          "name": "麦辣鸡翅-2块",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "1440",
+        "1406"
+      ],
+      "priceFen": 12250,
+      "quotedAt": "2026-10-10 16:39:58"
+    },
+    {
+      "id": "weekend-normal-3",
+      "people": 3,
+      "portion": 7,
+      "title": "3人 · 周末双人餐 + 麦香鸡套餐",
+      "wheelTitle": "周末分享餐",
+      "wheelKind": "3人套餐",
+      "packages": [
+        {
+          "productCode": "9900015151",
+          "name": "麦麦周末双人餐",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900005453",
+          "name": "麦香鸡中套餐",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "521730",
+          "name": "枫糖风味厚松饼猪柳蛋堡",
+          "quantity": 1
+        },
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "521741",
+          "name": "脆薯饼",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "520689",
+          "name": "小杯鲜萃咖啡",
+          "quantity": 1
+        },
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "521730",
+        "1440",
+        "1450"
+      ],
+      "priceFen": 7790,
+      "quotedAt": "2026-10-10 16:39:58"
+    },
+    {
+      "id": "bff-full-3",
+      "people": 3,
+      "portion": 9,
+      "title": "3人 · BFF分享餐 + 双份随心配",
+      "wheelTitle": "BFF分享餐",
+      "wheelKind": "3人套餐",
+      "packages": [
+        {
+          "productCode": "9900005321",
+          "name": "BFF四宫格小食盘双人餐",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        },
+        {
+          "productCode": "9900013304",
+          "name": "人气经典随心配",
+          "quantity": 1
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 1
+        },
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 1
+        },
+        {
+          "code": "516020",
+          "name": "中薯条",
+          "quantity": 1
+        },
+        {
+          "code": "516014",
+          "name": "麦乐鸡-5块",
+          "quantity": 1
+        },
+        {
+          "code": "520450",
+          "name": "薄皮焦香V翅",
+          "quantity": 1
+        },
+        {
+          "code": "516013",
+          "name": "麦辣鸡翅-2块",
+          "quantity": 1
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "1450",
+          "name": "麦香鸡",
+          "quantity": 1
+        },
+        {
+          "code": "3071",
+          "name": "无糖可口可乐中杯",
+          "quantity": 1
+        },
+        {
+          "code": "1401",
+          "name": "麦乐鸡5块",
+          "quantity": 1
+        },
+        {
+          "code": "4106",
+          "name": "香芋派",
+          "quantity": 1
+        }
+      ],
+      "mainCodes": [
+        "1440",
+        "1406",
+        "1450"
+      ],
+      "priceFen": 15030,
+      "quotedAt": "2026-10-10 16:39:58"
+    },
+    {
+      "id": "weekend-normal-4",
+      "people": 4,
+      "portion": 7,
+      "title": "4人 · 周末双人餐 × 2份",
+      "wheelTitle": "周末分享餐",
+      "wheelKind": "4人套餐",
+      "packages": [
+        {
+          "productCode": "9900015151",
+          "name": "麦麦周末双人餐",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "521730",
+          "name": "枫糖风味厚松饼猪柳蛋堡",
+          "quantity": 2
+        },
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 2
+        },
+        {
+          "code": "4810",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "521741",
+          "name": "脆薯饼",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 2
+        },
+        {
+          "code": "520689",
+          "name": "小杯鲜萃咖啡",
+          "quantity": 2
+        }
+      ],
+      "mainCodes": [
+        "521730",
+        "1440"
+      ],
+      "priceFen": 9980,
+      "quotedAt": "2026-10-10 16:40:04"
+    },
+    {
+      "id": "bff-full-4",
+      "people": 4,
+      "portion": 9,
+      "title": "4人 · BFF分享餐 × 2份",
+      "wheelTitle": "BFF分享餐",
+      "wheelKind": "4人套餐",
+      "packages": [
+        {
+          "productCode": "9900005321",
+          "name": "BFF四宫格小食盘双人餐",
+          "quantity": 2
+        }
+      ],
+      "parts": [
+        {
+          "code": "1440",
+          "name": "麦辣鸡腿汉堡",
+          "quantity": 2
+        },
+        {
+          "code": "1406",
+          "name": "板烧鸡腿堡",
+          "quantity": 2
+        },
+        {
+          "code": "516020",
+          "name": "中薯条",
+          "quantity": 2
+        },
+        {
+          "code": "516014",
+          "name": "麦乐鸡-5块",
+          "quantity": 2
+        },
+        {
+          "code": "520450",
+          "name": "薄皮焦香V翅",
+          "quantity": 2
+        },
+        {
+          "code": "516013",
+          "name": "麦辣鸡翅-2块",
+          "quantity": 2
+        },
+        {
+          "code": "3050",
+          "name": "可乐中杯",
+          "quantity": 4
+        }
+      ],
+      "mainCodes": [
+        "1440",
+        "1406"
+      ],
+      "priceFen": 24500,
+      "quotedAt": "2026-10-10 16:40:04"
+    }
+  ]
+}

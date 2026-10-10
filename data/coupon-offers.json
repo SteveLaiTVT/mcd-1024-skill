@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-10T17:17:03+08:00",
+  "source": "https://mcp.mcd.cn",
+  "kind": "sanitized-account-targeted-offer-snapshot",
+  "countMeaning": "distinct display offers; not claimable quantity",
+  "offers": [
+    {
+      "name": "巧克力味厚松饼猪柳蛋套餐",
+      "status": "CAN_GET",
+      "label": "可领取",
+      "canClaim": true,
+      "priceUse": "requires-claim-store-validation-and-live-quote"
+    },
+    {
+      "name": "免费脆薯饼",
+      "status": "CAN_GET",
+      "label": "可领取",
+      "canClaim": true,
+      "priceUse": "requires-claim-store-validation-and-live-quote"
+    },
+    {
+      "name": "人气麦旋风买一送一",
+      "status": "CAN_GET",
+      "label": "可领取",
+      "canClaim": true,
+      "priceUse": "requires-claim-store-validation-and-live-quote"
+    },
+    {
+      "name": "9.9元中杯冰美式",
+      "status": "CAN_GET",
+      "label": "可领取",
+      "canClaim": true,
+      "priceUse": "requires-claim-store-validation-and-live-quote"
+    }
+  ]
+}

@@ -6,10 +6,10 @@
 
 背景
 ----
-麦当劳 MCP 的部分接口（如 ``list-nutrition-foods``）不返回 JSON，
-而是返回一段**自描述的类 CSV 文本**：
+麦当劳 MCP 的部分接口（如 ``list-nutrition-foods``）在结构化响应的
+``data`` 字段中返回一段**自描述的类 CSV 文本**：
 
-    [160]{productName,nutritionDescription,energyKj,energyKcal,protein,carbohydrate,sodium,calcium}:
+    [160]{productName,nutritionDescription,energyKj,energyKcal,protein,fat,carbohydrate,sodium,calcium}:
       猪柳麦满分,null,1288,308,16,16,24,781,213
       猪柳蛋麦满分,null,1618,387,23,21,25,846,243
       ...

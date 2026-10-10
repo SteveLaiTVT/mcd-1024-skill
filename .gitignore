@@ -18,6 +18,7 @@ credentials/
 
 # 本地数据与产物
 data/local/
+.dataset-refresh-*/
 output/
 *.log
 .DS_Store

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "1.2.0",
+  "capturedAt": "2026-10-10T16:40:04+08:00",
+  "couponOffersCapturedAt": "2026-10-10T17:17:03+08:00",
+  "campaignsCapturedAt": "2026-10-10T17:17:03+08:00",
+  "context": {
+    "storeCode": "1421180",
+    "storeName": "麦当劳深圳华强北茂业餐厅",
+    "orderType": 1,
+    "beType": 1,
+    "timezone": "Asia/Shanghai",
+    "scope": "explicit sample store; not user location"
+  },
+  "defaults": {
+    "people": 1,
+    "portion": 7,
+    "budgetPerPersonYuan": 30
+  },
+  "peopleCoverage": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "portionValues": [
+    5,
+    7,
+    9
+  ],
+  "portionMeaning": "per-person preference; not a fullness guarantee",
+  "budgetInput": "per-person",
+  "quoteCouponMode": "no-explicit-coupon-id-or-code",
+  "amountUnit": "fen",
+  "currency": "CNY",
+  "sourceKind": "official-read-and-whole-cart-quote-snapshot",
+  "quoteTimeRange": {
+    "from": "2026-10-10 16:39:17",
+    "to": "2026-10-10 16:40:04",
+    "timezone": "Asia/Shanghai"
+  },
+  "counts": {
+    "menuItems": 117,
+    "packages": 8,
+    "nutritionRows": 160,
+    "nutritionDistinctNames": 158,
+    "tools": 35,
+    "recipes": 50,
+    "quotedPlans": 50,
+    "couponDisplayOffers": 4,
+    "campaignEntries": 18
+  },
+  "sha256": {
+    "menu.json": "d12ac06e49347aba6e5a21ca63bc6bf536be20a6f5558a3ac65b229fe03eb1e8",
+    "packages.json": "6e52bdeca09234d11e67cdb54778b9de832a16fecc3f29de03dfd69aa3b42470",
+    "nutrition.json": "20f15da8144c98f2b7804db6957afe60c4f736bf560e609d8d051132288f20ca",
+    "tool-catalog.json": "80048ee0c1bb1f0295a256e1ebc4b6cd5a2fc529baeed0b23b5cf1a7c8621338",
+    "meal-plans.json": "f13c8fb1849da41233e2a8fdb2e4445120a2080cd8a48a9602ef9c7fdbe8ce33",
+    "coupon-offers.json": "2f1db04e73a5b67abb4470cec77482dccac7304a171ba5269c163c9e8050fe47",
+    "campaigns.json": "e1a775a84ab2638d9f855d9a2da77a888b8be36c03342df4ea96d34b312de23e",
+    "plan-recipes.json": "2e02742042a33b986d66b93f0d52f13ac3740a5bd84a404cc5560b3026345a3f"
+  }
+}
