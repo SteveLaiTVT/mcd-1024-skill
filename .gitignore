@@ -1,0 +1,25 @@
+# 依赖与虚拟环境
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+node_modules/
+
+# 凭证：绝不允许提交任何真实 Token
+.env
+.env.*
+!.env.example
+*.token
+secrets/
+credentials/
+
+# 本地数据与产物
+data/local/
+output/
+*.log
+.DS_Store
+.idea/
+.vscode/
