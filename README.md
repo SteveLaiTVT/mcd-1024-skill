@@ -6,6 +6,8 @@
 
 [直接体验历史样本](https://stevelaitvt.github.io/mcd-1024-skill/) · [下载 2.3.0 扩展](https://github.com/SteveLaiTVT/mcd-1024-skill/releases/tag/v2.3.0) · [安装与更新](docs/release-guide.md) · [WorkBuddy 实际开发记录](workbuddy.md)
 
+活动申请已提交至 [官方 Issue #398](https://github.com/M-China/mcd-developer-innovation-challenge/issues/398)，报名结果以官方回复为准。发布验证见 [验证记录](docs/validation.md)。
+
 适合午餐选择困难、想在预算内吃完整套餐、或需要一起选餐的 1–4 人。无需 AI key 就能体验圆盘和示例热力图；实时选餐使用自己的麦当劳 Token，AI 饭搭子另用自己的 DeepSeek API key。
 
 例如：1 人、7 分饱、人均 30 元，勾选前两天吃过的主食 → 官方核价 → 转盘揭晓，或请饭搭子按口味与天气挑选。喜欢的组合可以主动记住，下次推荐会参考这些反馈。

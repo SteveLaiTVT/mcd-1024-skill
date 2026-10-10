@@ -72,7 +72,7 @@ Chrome 扩展详情实际从 2.2.0 更新到 2.3.0，四个明确域名权限已
 
 同一浏览器流程选择广东深圳天气后，主动点击双 Agent 推荐。真实 DeepSeek 返回并通过两轮校验，页面显示“DeepSeek V4.1 Flash · 2 轮完成”。首选为 ¥22.90 的大堡口福三件套，备选为 ¥28 的麦香鸡中套餐；标题 / 价格仍来自刚才 MCP 核验的餐单，保留“当前核验价 / 候选比较未查全”。没有额外自动重试，没有创建新业务写操作或消费 / 口味反馈。凭证值和原始模型响应未输出或保存。
 
-构建产物包含 19 个源码一致的前端资源、4 份公开数据；扩展另包含 manifest、launcher、安装说明、架构说明、AI 搭子说明和 build-info，共 29 文件，静态页 24 文件。最终字节 / 模块依赖 / 版本 / CSP / 秘密扫描另由构建核对完成。Python 与数据集没有本轮变更；本轮没有运行领券、下单、支付或公开部署。
+构建产物包含 19 个源码一致的前端资源、4 份公开数据；扩展另包含 manifest、launcher、安装说明、架构说明、AI 搭子说明和 build-info，共 29 文件，静态页 24 文件。最终字节 / 模块依赖 / 版本 / CSP / 秘密扫描另由构建核对完成。Python 与数据集没有该阶段变更；功能验证阶段没有运行领券、下单、支付或公开部署。后续公开发布记录见下文。
 
 ## 2.3.0 发布候选复核 · 2026-10-11
 
@@ -84,4 +84,21 @@ WorkBuddy 实际运行 69 项 JavaScript、23 项 Python 测试与数据集校�
 
 报名正文按官方 README 保持四行格式，项目地址为原始 GitHub URL，简介与字段名在同一行，简介 511 字；不含图片或私人手机号。手机号按活动规则用于获奖后的官方兑奖信息收集链路。
 
-实际交付入口：[GitHub Release 2.3.0](https://github.com/SteveLaiTVT/mcd-1024-skill/releases/tag/v2.3.0)、[静态体验](https://stevelaitvt.github.io/mcd-1024-skill/)、[部署工作流](https://github.com/SteveLaiTVT/mcd-1024-skill/actions/workflows/github-pages.yml)。平台构建与报名结果在完成发布后单独记录，不以本地测试代替线上结果。
+实际交付入口：[GitHub Release 2.3.0](https://github.com/SteveLaiTVT/mcd-1024-skill/releases/tag/v2.3.0)、[静态体验](https://stevelaitvt.github.io/mcd-1024-skill/)、[部署工作流](https://github.com/SteveLaiTVT/mcd-1024-skill/actions/workflows/github-pages.yml)。
+
+## GitHub 发布与报名 · 2026-10-11
+
+源代码按数据与核价工具、扩展与 Agent、WorkBuddy 发布配套、报名文档四个目的提交。公开的 `v2.3.0` 标签指向 `9124b73f50bd15261a3c5534cad5b1f61e6b40e0`；标签与当时的 main 已推送，Release 已发布，包含扩展 ZIP、静态 ZIP 和 `SHA256SUMS.txt`。后续文档提交不改动这个发布标签。
+
+从公开 Release 实际下载两份 ZIP，与本地发布包字节一致，CRC 检查通过。扩展含 29 个文件、88351 字节；静态包含 24 个文件、76527 字节，均只有一个顶层文件夹。SHA256：
+
+| 文件 | SHA256 |
+| --- | --- |
+| `mcd-wheel-extension-2.3.0.zip` | `a684e455883c164e8d238f718b36d84ddda0946db97799c5c2c8a2783064c936` |
+| `mcd-wheel-static-2.3.0.zip` | `bf44ed931268bc663d840eb94931745f89e177ad8e4f6e9976802f757d5a0fa6` |
+
+[首次公开构建与部署](https://github.com/SteveLaiTVT/mcd-1024-skill/actions/runs/38074066180)成功：69 项 JavaScript、23 项 Python、数据集验证、前端构建和发布文件复核全部通过，Pages 部署成功。在线站点的全部 24 个文件实际返回 HTTP 200，逐文件与静态构建字节一致，HTML 和 JavaScript 响应类型正确。
+
+桌面 Chrome 直接打开公开 HTTPS 站点，检查示例模式与禁用的凭证配置入口；实际生成 5 份历史样本报价、3 份预算内候选，圆盘揭晓 ¥20 完整套餐。雷达示例实际呈现 84 笔虚构订单、58 个日期、8 种餐品，全年热力图与日期明细正确显示。该公开体验验证使用样本，不请求真实麦当劳或 DeepSeek。
+
+报名正文已提交至 [官方 Issue #398](https://github.com/M-China/mcd-developer-innovation-challenge/issues/398)。提交后检查 Issue 为 OPEN、尚无官方回复；这证明申请已公开提交，报名确认以官方后续回复为准。私人手机号未进入源码、下载包或公开 Issue，活动规则的兑奖信息收集在获奖后另行进行。
