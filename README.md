@@ -1,130 +1,117 @@
-# mcd-1024-skill
+# 麦麦饱饱盘 · mcd-1024-skill
 
-> 基于**麦当劳中国 MCP** 开发的 Agent Skill · 参加「麦当劳程序员创意开发大赛」参赛作品
-> 非麦当劳官方产品
+饭点选套餐：几个人吃、每个人想吃几分饱、人均预算多少、前两天的主食要不要再吃？先比较完整套餐的优惠价，再让圆盘揭晓这一餐。AI 饭搭子用明确口味记忆、当地天气与节令挑选；麦当劳雷达用历史订单点亮用餐热力图。
 
----
+参赛者独立开发，非麦当劳官方产品。**2.3.0 · 无业务后端的浏览器扩展**，附带无需 Token 的静态体验页。
 
-## 项目状态
+[直接体验历史样本](https://stevelaitvt.github.io/mcd-1024-skill/) · [下载 2.3.0 扩展](https://github.com/SteveLaiTVT/mcd-1024-skill/releases/tag/v2.3.0) · [安装与更新](docs/release-guide.md) · [WorkBuddy 实际开发记录](workbuddy.md)
 
-**🚧 开发中（Scaffold）**
+适合午餐选择困难、想在预算内吃完整套餐、或需要一起选餐的 1–4 人。无需 AI key 就能体验圆盘和示例热力图；实时选餐使用自己的麦当劳 Token，AI 饭搭子另用自己的 DeepSeek API key。
 
-当前进度：
+例如：1 人、7 分饱、人均 30 元，勾选前两天吃过的主食 → 官方核价 → 转盘揭晓，或请饭搭子按口味与天气挑选。喜欢的组合可以主动记住，下次推荐会参考这些反馈。
 
-- [x] 连接麦当劳 MCP Server，完成 **24 个只读接口的实测**，产出 [`docs/mcp-field-notes.md`](docs/mcp-field-notes.md)
-- [x] 摸清返回数据形态、识别 7 个关键工程坑（返回格式不统一、数值类型混乱、特调 key 规则、门店经纬度为 0 等）
-- [ ] 核心功能开发（方向待定）
-- [ ] 可传播产出物
-- [ ] 在线 Demo
+## 下载后怎么用
 
----
+1. 从 [GitHub Release](https://github.com/SteveLaiTVT/mcd-1024-skill/releases/tag/v2.3.0) 下载扩展 ZIP，解压得到 `mcd-wheel-extension` 文件夹。
+2. Chrome 打开 `chrome://extensions`，或 Edge 打开 `edge://extensions`；开启开发者模式，选择“加载已解压的扩展程序”，选中该文件夹。
+3. 点击扩展图标 → “连接我的账号” → 填写自己的 [麦当劳 MCP Token](https://open.mcd.cn/mcp)，选择营业中的门店，开始核价。
+4. 顶部“AI 搭子与记忆”可配置 DeepSeek key、风格、Agent 和 prompt；两种 key 都能分别选择在本机长期保存。
 
-## 项目介绍
+这是 GitHub 下载发布，扩展尚未上架 Chrome / Edge 商店。在线体验页只展示历史样本与虚构雷达，不接收真实凭证；实时 MCP 与 DeepSeek 功能在扩展中使用。
 
-本项目是一个基于麦当劳官方 MCP（Model Context Protocol）能力构建的 **Agent Skill**，运行在支持 MCP 的智能体（如 WorkBuddy）中，通过自然语言对话调用麦当劳的真实业务接口。
+## 现在能做什么
 
-**已完成的 MCP 能力探查**覆盖以下场景：
+- 默认 **1 人、7 分、人均 30 元**，支持 1–4 人。每个人都有主餐，显示整顿上限、完整内容、总价和人均价。
+- 套餐优先：随心配、三件套餐、分享餐与多份完整套餐；前两天吃过的主食可以手动勾选，或从雷达读取后主动加入避开项，本页记住。
+- 麦当劳雷达：全年 / 近 12 周热力图、年份切换、日期餐单和常点餐品；只计已完成或已评价订单。接口没有分页参数，未返回的日期标为未知，不等于没吃过。
+- 扩展直接连接麦当劳。用户可自行勾选“在这个浏览器长期记住凭证”，将 Token 和上次门店保存在本机扩展中，刷新或重开自动连接；不进入开发者服务器、日志或浏览器同步。
+- 输入城市和地址 / 地标查找附近门店，或主动读取、选择麦当劳已保存的地址作为搜索位置；展示官方营业状态和时段，可随时换店。恢复上次门店前会向官方重新确认营业情况。
+- DeepSeek V4.1 Flash：推荐 Agent、优化 Agent 或最多两轮协作；可编辑口味与两个 prompt，选择温柔 / 节省 / 惊喜的搭子风格、偏好 / 省钱 / 换口味目标。key 与麦当劳凭证独立，长期保存默认关闭，刷新不自动请求 AI。
+- 明确喜欢 / 少推荐反馈可选择本机长期记忆，支持查看、忘掉和清空，旧偏好逐渐减弱；城市天气、月份和已核验的 2026 年节假日 / 调休进入推荐。AI 只选已核价候选 ID，卡片价格与餐品来自原报告；无 key 时仍可用本地偏好推荐。见 [AI 饭搭子说明](docs/meal-agents.md)。
+- 先查可领券、持有券、门店适用范围和活动日历，再比较各餐单的官方整单报价，最后按预算入盘。
+- “领取全部可领券”有明确确认窗口；官方一次领取全部，无法指定单张。领取后重新查券、核价，写请求不自动重试。
+- 暖色卡片、人数与食量切换、预算快捷选项、优惠口袋、核价进度、套餐圆盘与完整餐单结果；窄屏布局和减少动画偏好已适配。
+- 条件、门店、账号或券状态变化时，旧报价和旧转盘失效。实时结果最多保留五分钟，券到期或活动时段结束会提前失效。
 
-| 场景 | 已实测接口 |
+“最低已核验价”只覆盖当前模板和实际比较成功的券方案，不承诺整个菜单的全局最低。待领取券、活动文章与宣传价不会直接当作折扣；官方报价已经包含的自动活动不会重复扣减。
+
+## 本地构建与体验
+
+Node.js 20 或以上。没有 npm 依赖，无需安装依赖即可运行：
+
+```bash
+npm test
+npm run build
+```
+
+产物为 `output/mcd-wheel-extension/`（Manifest V3 扩展）与 `output/mcd-wheel-static/`（静态体验页）。前端运行不需要 Python、Node 业务服务或云端代理。
+
+静态体验可用 Python 3.10 或以上的标准库服务器预览：
+
+```bash
+npm run preview
+# 打开 http://127.0.0.1:8766
+```
+
+预览服务只提供静态文件，不读取 `MCD_TOKEN`，没有业务 API。静态模式明确展示历史样本、禁用真实 Token 输入和领券；普通网页直连当前受官方 CORS 策略限制。
+
+扩展原型可通过 Chrome/Edge 的“加载已解压的扩展程序”选择构建目录来检查。点击扩展图标打开应用页；实时选餐流程为填写用户自己的 Token → 选择门店 → 查券与核价 → 转盘或 AI 推荐。雷达入口为连接 Token → 麦当劳雷达 → 读取我的历史，无需先选门店。更新后在扩展详情页点击“重新加载”，关闭旧应用页，再从图标打开。2.3.0 申请 `storage` 和麦当劳 MCP、DeepSeek、Open-Meteo 天气 / 城市四个明确域名访问权限，未注入其他网页。用户已加载本地扩展，没有发布到商店。
+
+长期保存默认不勾选。勾选后，只在 Chrome / Edge 的 `storage.local` 保存凭证及上次门店的编码、名称和城市，不保存地址簿、券包、历史订单或旧报价。取消勾选删除已保存凭证，当前连接可继续用到本页关闭；“断开并清除已保存凭证”同时结束连接并删除记录。暂时联网失败保留凭证供重试；认证返回 401 / 403 则清除并提示重新输入。选店按本次官方状态确认。
+
+雷达查询只由用户点击触发，订单仅在当前页内存中处理，断开、刷新或关闭即清除；不把个人历史写入公开数据集。静态页提供明确标注的虚构热力图示例，不能用于导入最近主食。详细口径见 [雷达说明](docs/order-radar.md)。
+
+## 参赛形式与服务使用边界
+
+[官方活动规则](https://github.com/M-China/mcd-developer-innovation-challenge/blob/main/activityGuidelines.md)的项目定义包含应用程序、插件与工作流，没有要求业务后端。扩展形式可以作为本项目的参赛载体；源码、接入说明、参赛声明与使用环境变量占位符的配置示例保留在仓库中。
+
+活动同时引用 [MCP 服务规则](https://cdn.mcd.cn/cms/pages/MCPServerRules.html)。项目以用户主动操作、自己的凭证直接连接官方服务；本机凭证保存和多方案核价的服务规则适用情况，尚无官方针对本项目的说明。GitHub 发布与技术验证不代表官方服务认可或参赛审核通过，详见 [前端架构说明](docs/frontend-architecture.md)。
+
+## 数据与核价
+
+公开数据集是 **2026-10-10 深圳华强北样本门店快照**：117 项菜单、8 套套餐结构、50 份整单报价、160 条营养记录（158 个不同名称）、35 个工具定义、4 类去重后的可领取券展示和 18 条活动信息。采样时间、来源与哈希见 [data/manifest.json](data/manifest.json)。静态体验中的价格、券与活动都是历史样本。
+
+实时引擎按已持有资产、门店范围、状态、期限、关联活动时段与商品编码验证券。多人同款套餐拆出一份绑定一张券，同一资产不重复使用；保留原套餐选项。无券基准超预算也先尝试适用券，再按最终报价筛选。每份餐单最多比较 64 个券方案；失败、截断或分页不完整会显示比较不完整。
+
+当前只精确匹配已知商品编码，券专属商品自动替换尚待接入。普通多人餐使用到店自取 `beType=1/orderType=1`；企业团餐优惠不参与。
+
+Python 的样本刷新、数据校验与早期研究模块保留供复核，不是应用运行依赖。离线校验：
+
+```bash
+python3 scripts/verify_dataset.py
+python3 -m unittest discover -s tests
+```
+
+## 验证到哪里
+
+JavaScript 69 项测试通过，包含双 Agent、记忆和 key 恢复 / 隔离、候选校验、天气失败与取消竞态；此前 Python 23 项测试和数据校验通过。桌面 Chrome 已检查 2.3.0 设置、两个 prompt、本地候选选择、主动反馈和真实城市天气；已保存的麦当劳 / DeepSeek 配置在扩展重载后实际恢复，实时核价和 DeepSeek 两轮推荐已跑通，预算内候选价 ¥22.90 / ¥28。JavaScript MCP 客户端在 Node 环境真实完成初始化、时间、可领券与历史读取；此前历史返回 10 笔完成订单、8 个有记录日期，Python 验证了单人与双人官方整单核价。
+
+用户加载后遇到连接失败，已修正浏览器 `fetch` 调用上下文并补充回归测试。用户重新加载后反馈连接成功、出现门店选择，浏览器直连初始化已通过复测。雷达年度 / 近 12 周虚构示例已在 Chrome 检查；关闭整个浏览器后重开恢复、真实账号历史显示、持有券折扣、领券写操作与移动端像素尚未验证。没有为了验证执行领券、下单或付款。详见 [验证记录](docs/validation.md)。
+
+## 入口
+
+| 入口 | 内容 |
 |---|---|
-| 门店与时段 | `query-nearby-stores`、`now-time-info` |
-| 菜单与商品 | `query-meals`、`query-meal-detail`、`list-nutrition-foods` |
-| 价格 | `calculate-price` |
-| 订单 | `order-list`、`mall-order-list` |
-| 会员资产 | `query-my-account`、`query-my-coupons`、`query-store-coupons`、`available-coupons` |
-| 积分商城与活动 | `mall-points-products`、`query-lottery-info`、`campaign-calendar` |
-| 配送 | `delivery-query-addresses` |
+| [web/app.js](web/app.js) | 页面状态、账号与门店、领券确认、核价和圆盘交互 |
+| [web/mcp-client.mjs](web/mcp-client.mjs) | 固定官方域名的 MCP 客户端，运行中的凭证仅在内存 |
+| [web/account-storage.mjs](web/account-storage.mjs) | 用户选择后的本机保存、删除、跨页变更通知与串行访问 |
+| [web/store-search.mjs](web/store-search.mjs) | 官方门店营业信息、地址位置和城市识别 |
+| [web/agent-view.mjs](web/agent-view.mjs) / [web/meal-agent.mjs](web/meal-agent.mjs) | 饭搭子 UI、两个 Agent 和限定候选的推荐流程 |
+| [web/agent-memory.mjs](web/agent-memory.mjs) / [web/agent-prompts.mjs](web/agent-prompts.mjs) | 可编辑提示词、明确反馈与偏好衰减 |
+| [docs/meal-agents.md](docs/meal-agents.md) | DeepSeek 用法、天气节令、记忆和数据发送范围 |
+| [web/meal-engine.mjs](web/meal-engine.mjs) | 套餐构造、券分配、整单比较、预算和报价有效期 |
+| [web/order-history.mjs](web/order-history.mjs) | 官方历史读取、完成状态、日期归属、去重与热力图统计 |
+| [web/radar-view.mjs](web/radar-view.mjs) | 日历、日期餐单、常点餐品与主动导入最近主食 |
+| [docs/order-radar.md](docs/order-radar.md) | 雷达用法、数据覆盖与隐私口径 |
+| [docs/frontend-architecture.md](docs/frontend-architecture.md) | 纯前端方案、隐私与接入边界 |
+| [docs/product-plan.md](docs/product-plan.md) | 人数、套餐、不重样与圆盘流程 |
+| [docs/coupon-flow.md](docs/coupon-flow.md) | 可领、持有、门店适用、领取与计价 |
+| [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | 工具、调用链路与脱敏配置 |
+| [data/README.md](data/README.md) | 样本来源、字段和刷新规则 |
+| [docs/benefit-status.md](docs/benefit-status.md) | 历史券/活动信息表与核价记录 |
+| [workbuddy.md](workbuddy.md) | 开发工具证据状态 |
+| [docs/release-guide.md](docs/release-guide.md) | GitHub 下载、扩展安装与更新、静态体验和发布方式 |
 
-详细的数据形态、字段说明与踩坑记录见 **[`docs/mcp-field-notes.md`](docs/mcp-field-notes.md)**。
+Token 申请入口：[官方 MCP 平台](https://open.mcd.cn/mcp)。环境变量占位符示例见 [mcp-config.example.json](mcp-config.example.json)，扩展不会读取开发者环境变量。
 
----
-
-## 目标用户
-
-面向使用麦当劳中国 App / 小程序的日常消费者，以及希望通过 AI 智能体更高效完成点餐决策的人群。
-
-*（具体人群画像将随功能方向确定后补充）*
-
----
-
-## 安装方法
-
-### 前置条件
-
-1. 申请麦当劳中国 MCP Token：访问 <https://open.mcd.cn/mcp> → 手机号登录 → 控制台 → 激活 → 复制 Token
-2. 一个支持 **Streamable HTTP** 协议的 MCP Client（推荐 WorkBuddy、Cherry Studio、Cursor、Trae）
-
-### 配置 MCP Server
-
-将以下内容填入 MCP Client 的 Server 配置，并把 `${MCD_MCP_TOKEN}` 替换为你的实际 Token：
-
-```json
-{
-  "mcpServers": {
-    "mcd-mcp": {
-      "type": "streamablehttp",
-      "url": "https://mcp.mcd.cn",
-      "headers": {
-        "Authorization": "Bearer ${MCD_MCP_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-参考文件：[`mcp-config.example.json`](mcp-config.example.json)
-
-### 通过对话安装本 Skill
-
-在 WorkBuddy 中复制以下内容发送：
-
-```text
-请从 https://github.com/SteveLaiTVT/mcd-1024-skill 安装「mcd-1024-skill」：
-先阅读 README.md 与 docs/mcp-field-notes.md，按说明配置麦当劳 MCP 连接器并自检连通性，
-然后引导我使用。
-```
-
----
-
-## 使用示例
-
-*（功能开发完成后补充）*
-
----
-
-## 目录结构
-
-```
-mcd-1024-skill/
-├── README.md                    项目介绍、安装方法、使用示例、目标用户
-├── CONTEST_DECLARATION.md       参赛声明（官方原文，内容不可改动）
-├── MCP_INTEGRATION.md           使用的 MCP Server / Tool、调用流程、业务价值
-├── mcp-config.example.json      脱敏 MCP 配置示例（仅环境变量占位符）
-├── workbuddy.md                 WorkBuddy 开发对话上下文
-├── LICENSE                      MIT
-├── docs/
-│   └── mcp-field-notes.md       麦当劳 MCP 实测笔记（24 个接口 + 7 个工程坑）
-└── src/                         源代码
-```
-
----
-
-## 安全说明
-
-- 本仓库**不包含任何真实 Token、密钥或账号凭证**，配置文件仅使用环境变量占位符
-- 所有涉及费用的写操作（下单、领券、抽奖、兑换）在设计上均需**用户显式确认**后才执行
-- 麦当劳 MCP Token 限流 **600 次/分钟**，使用中需控制调用频率
-
----
-
-## 参赛说明
-
-本项目参加「麦当劳程序员节创意开发大赛」。
-
-- 参赛声明：[`CONTEST_DECLARATION.md`](CONTEST_DECLARATION.md)
-- MCP 接入说明：[`MCP_INTEGRATION.md`](MCP_INTEGRATION.md)
-- 项目为参赛者独立开发，**非麦当劳官方产品**；项目输出仅供参考，不构成医疗、营养或其他专业建议；餐品信息、价格及供应状态以麦当劳官方渠道的实时结果为准。
-
-## License
-
-[MIT](LICENSE)
+5 / 7 / 9 分是份量偏好，不保证饱腹程度。参赛声明见 [CONTEST_DECLARATION.md](CONTEST_DECLARATION.md)，代码许可证为 [MIT](LICENSE)。餐品、价格与供应以麦当劳官方结果为准。

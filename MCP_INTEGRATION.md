@@ -1,156 +1,83 @@
 # MCP 接入说明
 
-> 本文档说明本项目实际使用的麦当劳 MCP Server、Tool、调用流程与业务价值。
-> 实测时间：2026-10-10 · 实测环境：WorkBuddy 连接器直连
+官方地址为 `https://mcp.mcd.cn`，Streamable HTTP、Bearer Token。当前前端原型使用 [web/mcp-client.mjs](web/mcp-client.mjs)：用户在本地扩展应用页输入自己的凭证，直接发送给官方；不经过开发者业务服务器。
 
----
+[mcp-config.example.json](mcp-config.example.json)保留 `${MCD_TOKEN}` 环境变量占位符，供支持展开占位符的 MCP 宿主使用。Python 研究脚本读取进程环境；扩展不读取它，也不把 Token 写入配置文件。真实 WorkBuddy 调研、初始化与发布配套记录见 [workbuddy.md](workbuddy.md)，专项奖励以活动审核为准。
 
-## 1. 使用的 MCP Server
+## 工具与用途
 
-| 项 | 值 |
-|---|---|
-| 名称 | 麦当劳中国 MCP Server（`mcd-mcp`） |
-| 接入地址 | `https://mcp.mcd.cn` |
-| 传输协议 | **Streamable HTTP** |
-| 认证方式 | 请求头 `Authorization: Bearer <MCD_MCP_TOKEN>` |
-| Token 申请 | <https://open.mcd.cn/mcp>（手机号登录 → 控制台 → 激活） |
-| 限流 | 600 次/分钟（超出返回 429） |
-| 工具总数 | 35 个 |
-| 官方文档 | <https://github.com/M-China/mcd-mcp-server> |
-
-配置示例见 [`mcp-config.example.json`](mcp-config.example.json)。**本仓库不含任何真实 Token。**
-
----
-
-## 2. 实际调用的 Tool
-
-> 下表为**实测已调用**的 16 个接口（均已完成真实请求并记录返回）。
-
-### 2.1 基础设施类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `now-time-info` | 无 | 获取服务器时间，用于时段判断与活动日历锚定 | JSON：`timestamp` / `datetime` / `dayOfWeek` / `timezone` |
-
-### 2.2 门店与菜单类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `query-nearby-stores` | `beType=1`、`searchType=2`、`city`、`keyword` | 定位可点餐门店 | JSON 数组：`storeCode` / `storeName` / `address` / `distance` / `businessStatus` / 营业时段 / 可预约时段 |
-| `query-meals` | `storeCode`、`orderType=1`、`beType=1` | 拉取门店在售菜单与价格 | JSON：`categories` 分类 + `meals` 商品映射（名称/图片/现价/原价/优惠类型/随单购） |
-| `query-meal-detail` | `storeCode`、`orderType`、`beType`、`code` | 查看套餐组成与可换选项 | JSON：`rounds` 选配轮次 + `choices` 选项 + `modification` 特调项 |
-| `list-nutrition-foods` | 无 | 获取官方营养数据 | **文本表**：160 条 × 9 字段（能量/蛋白/脂肪/碳水/钠/钙） |
-
-### 2.3 价格类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `calculate-price` | `storeCode`、`orderType`、`beType`、`items[]` | **只算价，不创建订单** | JSON：`price` / `discount` / `originalPrice`（**单位：分**）、逐项小计、取餐方式、已享受/可享受优惠 |
-
-### 2.4 会员资产类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `query-my-account` | 无 | 查询积分账户 | JSON：可用/累计/已用/已过期/冻结/本月将过期/下月将过期积分 |
-| `query-my-coupons` | `page`、`pageSize` | 卡包内全部券 | **文本** |
-| `query-store-coupons` | `storeCode`、`orderType`、`beType` | 指定门店可用券 | 模板文本 + JSON 数组 |
-| `available-coupons` | 无 | 当前可领取的券 | **文本 + 图片链接** |
-
-### 2.5 订单与商城类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `order-list` | 无 | 历史点餐订单（**含套餐子项拆解**） | JSON：`orderProductList[].comboItemList[]` |
-| `mall-order-list` | `size` | 麦麦商城订单 | JSON：`orderId` / `orderStatus` / `goods[]` |
-| `mall-points-products` | 无 | 积分商城商品 | 模板文本 + JSON：`spuId` / `point` / `price` / `upTime` / `downTime` / `status` |
-| `query-lottery-info` | 无 | 积分抽奖活动（**不执行抽奖**） | JSON：`drawPoint` / `drawTypeText` / `drawDecision` / `prizes[]` |
-| `delivery-query-addresses` | 无 | 配送地址列表 | 模板文本 + JSON：`addressId` / `contactName` / `fullAddress` |
-
-### 2.6 活动中台类
-
-| Tool | 调用参数 | 用途 | 实测返回 |
-|---|---|---|---|
-| `campaign-calendar` | 可选 `specifiedDate` | 当月营销活动日历 | **文本**：往期 / 今日 / 未来，含活动标题、说明、配图 |
-
-### 2.7 未执行的写操作
-
-以下工具具备真实业务后果，**开发过程中一律未调用**：`create-order`、`cancel-order`、`auto-bind-coupons`、`mall-create-order`、`draw-lottery`、`party-order-create`、`delivery-create-address`。
-
-设计原则：**任何写操作都必须经用户显式确认后才执行，绝不静默扣费或领券。**
-
----
-
-## 3. 调用流程
-
-### 3.1 探测链路（零副作用，用于连通性自检）
-
-```
-now-time-info                    ← 无参数、无副作用，验证 Token 与连通性
-  → query-nearby-stores(city, keyword)   ← 取得 storeCode
-    → query-meals(storeCode)             ← 取得商品 code 与价格
-      → query-meal-detail(code)          ← 取得套餐结构与特调项
-        → calculate-price(items)         ← 试算价格（不产生订单）
-```
-
-### 3.2 到店点餐链路
-
-```
-query-nearby-stores(beType=1)
-  → query-meals(storeCode, orderType=1, beType=1)
-    → query-meal-detail(storeCode, code)          ← 如需换品 / 特调
-      → query-store-coupons(storeCode, orderType, beType)
-        → calculate-price(storeCode, items[])
-          → create-order(...)                     ⚠️ 需用户显式确认
-```
-
-### 3.3 会员资产链路
-
-```
-query-my-account                 ← 积分余额与过期敞口
-  + query-my-coupons             ← 卡包全部券
-  + query-store-coupons          ← 指定门店可用券
-  + mall-points-products         ← 积分可兑换商品
-    → 交叉计算：积分现值、最优兑换出口、即将过期风险
-```
-
----
-
-## 4. 业务价值
-
-### 4.1 已验证的能力
-
-1. **全链路可达**：从"找店 → 看菜单 → 选品 → 算价 → 用券"的完整到店点餐闭环，所有接口均已实测跑通。
-2. **零副作用试算**：`calculate-price` 允许在不产生订单的前提下反复试算任意商品组合的价格，为"组合优化"类能力提供了安全基础。
-3. **真实数据源**：所有价格、库存、优惠、活动信息均来自麦当劳官方接口实时返回，**不使用离线快照**。
-4. **营养数据可得**：`list-nutrition-foods` 提供 160 项官方营养数据，覆盖能量、蛋白质、脂肪、碳水化合物、钠、钙六个维度。
-
-### 4.2 已识别的工程价值点
-
-在实测中发现了若干**未被公开讨论的数据工程问题**，这些构成了本项目的技术壁垒：
-
-| 问题 | 说明 | 处理难度 |
+| 工具 | 业务用途 | 当前前端 |
 |---|---|---|
-| **返回格式不统一** | 一半接口返回纯 JSON，一半返回 Markdown 文本，还有一部分是"模板文本 + 尾部 JSON"无分隔符 | 高——需为每类接口单独写解析适配层 |
-| **数值类型混乱** | 菜单价格是**元（字符串）**、算价结果是**分（整数）**、订单金额是**元（字符串）**，三种口径并存 | 中——需统一转换 |
-| **特调 key 反直觉** | 含 `unselectedKey` 的特调组必须**全部传参**，"不要某配料"要传 `unselectedKey` 而非不传 | 高——写错则算价/下单失败 |
-| **门店经纬度为 0** | `query-nearby-stores` 的 `longitude`/`latitude` 实测恒为 `0.0` | 中——需自行地理编码或用 `distance` 替代 |
-| **数据重复与过期未下架** | 营养表与券列表存在重复项；`mall-points-products` 中 `downTime` 已过的商品仍标记 `status=2`（上架） | 中——需按时间二次过滤 + 去重 |
+| `now-time-info` | 官方日期、核价与报价有效时间 | 已实现 |
+| `query-nearby-stores` | 按用户填写的城市 / 位置关键词选店，恢复时确认营业情况 | 展示营业状态、时段及全部返回预约时段；没有经纬度入参 |
+| `delivery-query-addresses` | 用户主动读取已存地址，选择搜索位置 | 仅保留 `fullAddress` 供本页选择，不展示联系人、电话或 ID |
+| `query-meals` | 选择门店当前菜单 | 已实现 |
+| `query-meal-detail` | 套餐轮次、子项数量与特调 key | 已实现 |
+| `available-coupons` | 当前可领取券展示 | 已实现 |
+| `query-my-coupons` | 逐页读取持有券，按资产去重 | 已实现 |
+| `query-store-coupons` | 门店/到店渠道范围与商品映射 | 已实现 |
+| `campaign-calendar` | 活动表与可关联的券星期/时段限制 | 已实现 |
+| `calculate-price` | 完整餐单的无券基准和有券方案核价 | 已实现 |
+| `order-list` | 个人历史订单、套餐子项与用餐热力图 | 用户主动读取；无分页参数，覆盖不完整 |
+| `auto-bind-coupons` | 领取全部当前可领券 | 仅显式按钮确认；未实际执行 |
+| `list-nutrition-foods` | 公开营养表快照 | 仅研究脚本，非当前页面请求 |
 
-### 4.3 业务价值主张
+只读工具有明确允许列表；领券通过独立方法发送一次。历史只使用 `order-list`，不调用含地址、电话或支付数据的订单详情工具。前端没有创建、支付、取消、配送或企业团餐链路。发现 35 个工具不等于全部使用，公开定义见 [data/tool-catalog.json](data/tool-catalog.json)。
 
-**对用户**：把散落在麦当劳 App 多个页面、需要手动比对的决策过程（菜单价格、可用券、积分余额、套餐组成、营养数据），压缩为一次自然语言对话，并给出**有数据出处**的结论。
+## 前端调用流程
 
-**对生态**：为麦当劳 MCP 的数据形态问题提供一套可复用的**适配与清洗层**，降低后续开发者的接入成本。
+```text
+用户填 Token → initialize → notifications/initialized → now-time-info
+  或从本机已保存凭证恢复 → initialize → now-time-info
+  → query-nearby-stores 重新确认上次门店，不恢复旧报价
+用户主动读取地址 → delivery-query-addresses → 选地址填入位置，确认城市
+用户按城市/关键词查询门店 → 明确选择到店门店
+  → now-time-info + available-coupons + query-my-coupons（分页）
+  + query-store-coupons + campaign-calendar → 优惠信息表
+用户提交人数、食量、人均预算和确认避开的主食
+  → 重查优惠状态 → query-meals + query-meal-detail
+  → 构造完整套餐，核实每人主餐数量与合法选项
+  → calculate-price（无券基准 + 持有且适用的券方案）
+  → 完成全部比较 → 按整顿预算过滤 → 启用圆盘
 
----
+用户在雷达点击“读取我的历史”（不需要门店）
+  → now-time-info → order-list({})
+  → 去重、筛选已完成 / 已评价、按中国时区归日
+  → 全年或近 12 周热力图、日期餐单、常点餐品
+  → 用户主动把前两天可识别主食加入避开项 → 重新核价
+```
 
-## 5. 实测边界与已知限制
+领券按钮先说明“全部领取”，确认后调用 `auto-bind-coupons({})`，再重新查券与核价；不支持单张参数。超时或响应不明确时不自动重试，也不当作成功，要求先主动刷新券包核对。
 
-- **团餐 / 外送链路未完整验证**：`query-meal-assistance`（企业团餐助餐服务）需要先有配送地址，当前账号无地址，链路未走通。
-- **无登录态下的券查询**：`query-store-coupons` 在无持券账号的情况下返回空数组，无法验证有券场景的完整返回。
-- **未验证下单与支付**：所有写操作均未执行，`create-order` 之后的行为未经实测。
-- **数据时效性**：菜单、价格、活动均随门店与时间变化，本文档记录的字段**结构**稳定，但具体数值仅代表实测时刻。
+当前取餐场景为 `beType=1/orderType=1`，不传 `beCode`。`query-promotions` 的前置条件是企业团餐，普通多人餐的信息表标记其不适用。
 
----
+## 协议、隐私与计价规则
 
-*本项目为麦当劳程序员节创意开发大赛参赛作品，由参赛者独立开发，非麦当劳官方产品。*
+- 固定官方域名，请求不携带 Cookie，不跟随重定向，不记录原始响应或请求日志。支持 JSON 和 SSE，按 RPC ID 选择结果，优先读取 `structuredContent`。
+- Token 默认仅在应用页内存中，提交后清空输入框。2.2.0 提供默认不勾选的本机长期保存选项，仅保存 Token 和上次门店身份到 `chrome.storage.local`，限制为扩展可信上下文，不同步、不上传开发者。取消勾选或主动断开删除记录；页面退出只清除当前客户端和在途请求。MCP session、券资产、地址簿、历史与报价不持久保存。
+- 个人资产 ID/规则码只用于官方核价，展示报告不输出这些标识。没有埋点、云端存储或浏览器同步存储。
+- 核价金额用整数分；菜单字符串价格只作展示。子项数量按每份套餐提交，展开餐单时乘外层套餐份数；特调的选中与未选中 key 都保留。
+- 持有证明与门店可用范围均满足后才尝试用券，同一资产最多使用一次。活动文章的 0 值价格不代表免费；官方整单已有优惠不再扣一次。
+- 每份餐单最多比较 64 个券方案，钱包最多读取 5 页 × 200 项。截断、失败或规则读取不完整时显示限制，不宣称全局最低。
+- 服务器时间决定剩余有效期，浏览器以单调时钟倒计时。修改条件、换门店、领券、断开或过期后旧圆盘失效。
+- 雷达按已返回的完成订单数着色，不推断个人吃了多少餐或全年消费；订单 ID 只在本次响应去重，统计对象和页面不保留它。订单金额单位尚未确认，因此不展示消费额。未返回日期保留未知状态。
+
+## 静态模式与研究数据
+
+2.3.0 的 AI 推荐使用独立 DeepSeek 客户端，不把 MCP Token 交给模型。先按上述流程完成核价，再把限定候选、手写偏好 / prompt、明确反馈摘要和已读城市情境发送到 DeepSeek 官方 API；推荐 / 优化 Agent 最多两轮，不能调用任何 MCP 业务工具。key 和记忆各有独立本机 opt-in，麦当劳和 DeepSeek 可以分别停用 / 清除。官方模型标识为 `deepseek-flash`（V4.1 Flash）。天气使用 Open-Meteo 城市中心，没有 GPS、私人地址或订单发送；数据范围见 [docs/meal-agents.md](docs/meal-agents.md)。
+
+`scripts/serve_wheel.py` 只提供构建后的静态文件，没有业务 API，也不读取 Token。普通网页当前不能通过官方 CORS 预检；静态体验禁用 Token 输入和真实领券，套餐使用标明采样时间的公开样本，雷达示例明确标注虚构且不能导入主食。
+
+Python 模块保留早期研究与样本复核流程：门店/菜单/套餐 → 50 份整单核价 → 营养、可领券与日历 → 脱敏、校验、写入 manifest。数据为深圳样本门店与采样时点绑定的结果，不能替代实时核价。
+
+## 实测边界
+
+2026-10-10 17:42，当前 JavaScript 客户端在 Node 环境完成官方初始化、时间查询与可领券查询，返回 6 条展示。此前 Python 完成单人 5 份、双人 6 份官方整单核价；30 元人均预算分别留下 3 / 4 份候选。券包与样本门店券为空。
+
+当前 JavaScript 历史读取在 Node 环境返回 10 笔完成订单、8 个有记录日期，真实数据按模块生成 53 周年度日历；前两天没有可精确匹配的已知主食。原始订单未保存。这证明官方读取和统计，不证明浏览器热力图已验收。
+
+这些 Node/Python 结果证明协议与部分业务数据可读取，不单独证明浏览器直连。用户安装后发现调用上下文错误，修复后重新加载并明确反馈连接成功、出现门店选择，浏览器初始化获得独立复测证据。当前 48 项 JavaScript 测试通过，包含本机凭证恢复和营业状态、地址选择的模拟验证。真实长期凭证恢复和地址查询需分别核对。新版雷达虚构示例已在 Chrome 检查显示；真实长期凭证恢复、真实历史显示、领取成功、真实持券折扣和后续整单浏览器链路仍需分别验证；领券、下单、支付、公开部署均未执行。证据清单见 [docs/validation.md](docs/validation.md)。
+
+参赛形式与 MCP 服务使用规则是两个边界，现有自动化调用限制如何适用于本地扩展仍待官方确认，见 [docs/frontend-architecture.md](docs/frontend-architecture.md)。
+
+2.3.0 后续 Chrome 实测已完成保存账号 / 门店恢复、官方券查询与单人实时整单核价：4 份报价成功 / 2 份预算内，另 1 份失败未入盘；¥22.90 / ¥28 的候选经真实 DeepSeek 推荐与优化两轮校验显示。未将 MCP 凭证、地址或订单传给模型；没有执行领券、下单或付款。详见最新 [验证记录](docs/validation.md)。
