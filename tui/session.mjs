@@ -1,0 +1,225 @@
+// TUI state around the existing web modules. Credentials come from process env
+// only, live in private fields, and are never printed or written anywhere.
+// Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
+import { MCPClient, MCPError } from '../web/mcp-client.mjs';
+import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue } from '../web/meal-engine.mjs';
+import { readHistory, demoHistory, shiftDay } from '../web/order-history.mjs';
+import { storeResults } from '../web/store-search.mjs';
+import { DeepSeekClient, DeepSeekError } from '../web/deepseek-client.mjs';
+import { calendarContext, WeatherClient } from '../web/agent-context.mjs';
+import { defaultPreferences, learnFeedback } from '../web/agent-memory.mjs';
+import { DEFAULT_INTENT } from './intent.mjs';
+import { couponPicture, claimableList, buildProfile, runAssistantAgents } from './assistant.mjs';
+import { receiptFrom } from './receipt.mjs';
+import { alaCarteMains, demoAlaCarte, liveAlaCarte, mergeAlaCarte, applyUpgrades } from './pricing.mjs';
+import { applyAllergyFilter, normalizeAllergens, loadProfile, saveProfile } from './allergy.mjs';
+import { activitiesFromCalendar, activitiesFromSnapshot, classifyActivities } from './activity.mjs';
+
+export class TuiError extends Error {}
+
+export class TuiSession {
+  #mcdToken; #deepseekKey; #mcp = null; #deepseek = null; #allergies = [];
+  // profilePath: local JSON for allergy memory; null keeps it in memory only (tests, or no home directory).
+  constructor({ dataset, env = process.env, demo = false, mcpFactory = (t) => new MCPClient(t), deepseekFactory = (k) => new DeepSeekClient(k),
+    weatherClient = new WeatherClient(), now = () => new Date(), wheel = new WheelSession(), random = Math.random, profilePath = null }) {
+    this.profilePath = profilePath; this.profileError = '';
+    if (profilePath) {
+      const loaded = loadProfile(profilePath);
+      this.#allergies = loaded.allergies;
+      // A file we could not read is never overwritten: the user must fix or remove it first.
+      if (loaded.error) this.profileError = loaded.error;
+    }
+    this.#mcdToken = String(env.MCD_TOKEN || '').trim();
+    this.#deepseekKey = String(env.DEEPSEEK_API_KEY || '').trim();
+    this.dataset = dataset; this.demo = demo; this.mcpFactory = mcpFactory; this.weatherClient = weatherClient; this.now = now; this.wheel = wheel; this.random = random;
+    this.store = null; this.history = null; this.benefits = null; this.weather = { status: 'unavailable' }; this.lastPick = null;
+    this.lastReceipt = null; // Survives invalidate(): it is a record of a past pick, timestamped.
+    this.request = { people: DEFAULT_INTENT.people, portion: DEFAULT_INTENT.portion, budgetPerPersonFen: Math.round(DEFAULT_INTENT.budgetPerPersonYuan * 100), avoidMainCodes: [] };
+    this.profile = {}; // Only values set explicitly with /set; instructions without numbers fall back to these, then DEFAULT_INTENT.
+    // Cheapest effective price (after coupons) wins unless the user asks for another goal.
+    this.preferences = { ...defaultPreferences(), mode: 'team', goal: 'cheapest' };
+    this.deepseekNote = '';
+    if (this.#deepseekKey) {
+      try { this.#deepseek = deepseekFactory(this.#deepseekKey); }
+      catch (e) { this.deepseekNote = e instanceof DeepSeekError ? e.message : 'DeepSeek key 格式未通过校验。'; }
+    }
+    this.mainNames = new Map(dataset.plans.plans.flatMap((p) => p.parts.filter((part) => dataset.templates.mainProductCodes.includes(part.code)).map((part) => [part.code, part.name])));
+    if (demo) this.store = { ...dataset.templates.sampleStore, businessStatus: null, sample: true };
+  }
+
+  get hasMcdToken() { return Boolean(this.#mcdToken); }
+  get hasDeepSeek() { return Boolean(this.#deepseek); }
+  get deepseek() { return this.#deepseek; }
+  get connected() { return Boolean(this.#mcp); }
+  get context() { return this.store ? { storeCode: this.store.storeCode, orderType: 1, beType: 1 } : null; }
+
+  // Defence in depth: any accidental echo of a credential is masked before output.
+  redact(text) {
+    let out = String(text);
+    for (const secret of [this.#mcdToken, this.#deepseekKey]) if (secret.length >= 8) out = out.split(secret).join('[已隐藏]');
+    return out;
+  }
+
+  async connect() {
+    if (this.demo) throw new TuiError('当前是样本模式（--demo），不连接麦当劳。');
+    if (!this.#mcdToken) throw new TuiError('未检测到环境变量 MCD_TOKEN。请在启动前 export MCD_TOKEN=…（终端版不会询问或保存 Token）。');
+    this.#mcp?.close(); this.#mcp = null;
+    let client;
+    try { client = this.mcpFactory(this.#mcdToken); } catch (e) { throw new TuiError(e instanceof MCPError ? e.message : 'MCD_TOKEN 格式无效。'); }
+    try { await client.initialize(); await client.call('now-time-info'); }
+    catch (e) { client.close(); throw new TuiError(e instanceof MCPError ? e.message : '麦当劳 MCP 连接未完成。'); }
+    this.#mcp = client; this.invalidate(); return this;
+  }
+  requireClient() {
+    if (!this.#mcp) throw new TuiError(this.demo ? '样本模式不读取实时账户数据。' : '尚未连接麦当劳 MCP，请先 /connect。');
+    return this.#mcp;
+  }
+  requireStore() { if (!this.context) throw new TuiError('还没选门店：先用 /store 城市 关键词 搜索并选择。'); return this.context; }
+
+  async searchStores(city, keyword) {
+    if (!city || !keyword) throw new TuiError('用法：/store 城市 位置关键词，例如 /store 深圳 华强北');
+    return storeResults((await this.requireClient().call('query-nearby-stores', { beType: 1, searchType: 2, city, keyword })).data);
+  }
+  selectStore(store, city) { this.store = { ...store, city }; this.benefits = null; this.weather = { status: 'unavailable' }; this.invalidate(); }
+
+  setRequest(change) { this.request = { ...this.request, ...change }; this.invalidate(); }
+  setProfile(change) {
+    const { budgetPerPersonFen, ...rest } = change;
+    this.profile = { ...this.profile, ...rest, ...(budgetPerPersonFen != null ? { budgetPerPersonYuan: budgetPerPersonFen / 100 } : {}) };
+    this.setRequest(change);
+  }
+  invalidate() { this.wheel.invalidate(); this.lastPick = null; }
+
+  async coupons(onProgress) {
+    const client = this.requireClient(), context = this.requireStore();
+    this.benefits = await inspectBenefits(client, context, onProgress); return this.benefits;
+  }
+
+  get allergies() { return [...this.#allergies]; }
+  // Returns { added, existing, saved }; `saved` is false when only this session remembers them.
+  addAllergies(tokens) {
+    const wanted = normalizeAllergens(tokens), added = wanted.filter((a) => !this.#allergies.includes(a));
+    if (!added.length) return { added, existing: wanted, saved: Boolean(this.profilePath) && !this.profileError };
+    this.#allergies = [...this.#allergies, ...added]; this.invalidate();
+    return { added, existing: wanted.filter((a) => !added.includes(a)), saved: this.#saveProfile() };
+  }
+  removeAllergies(tokens) {
+    const names = normalizeAllergens(tokens), removed = this.#allergies.filter((a) => names.includes(a) || tokens.includes(a));
+    if (!removed.length) return { removed, saved: false };
+    this.#allergies = this.#allergies.filter((a) => !removed.includes(a)); this.invalidate();
+    return { removed, saved: this.#saveProfile() };
+  }
+  #saveProfile() {
+    if (!this.profilePath || this.profileError) return false;
+    try { saveProfile(this.profilePath, { allergies: this.#allergies }); return true; }
+    catch { throw new TuiError('过敏记录没能写入本地文件，本次会话内仍然生效；请检查 ~/.config/mcd-tui 的权限。'); }
+  }
+
+  async quote(onProgress = () => {}) {
+    const context = this.requireStore(), request = { ...this.request, avoidMainCodes: [...this.request.avoidMainCodes], wantMainCodes: [...(this.request.wantMainCodes || [])] };
+    this.invalidate();
+    if (!this.demo) this.benefits = null;
+    // prepareWheel reports the coupon check it ran through onProgress; keep it for the coupon picture.
+    const capture = (p) => { if (p?.benefits) this.benefits = p.benefits; onProgress(p); };
+    const report = this.demo
+      ? prepareDemo({ plans: this.dataset.plans, offers: this.dataset.offers, campaigns: this.dataset.campaigns }, { ...context, storeName: this.store.storeName }, request)
+      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture);
+    // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
+    const mains = alaCarteMains(this.mainNames, request);
+    const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
+      : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress) : {};
+    mergeAlaCarte(report, singles);
+    applyAllergyFilter(report, this.#allergies);
+    applyUpgrades(report, this.mainNames);
+    report.counts = { ...report.counts, quotedPlans: report.quotedPlans.length, wheelCandidates: report.candidates.length };
+    if (report.status === 'ready' && !report.candidates.length) report.status = 'empty';
+    this.wheel.accept(report); return report;
+  }
+  couponPicture() {
+    const claimable = this.demo ? claimableList(this.dataset.offers?.offers, this.dataset.campaigns?.events) : claimableList(this.benefits?.offers, this.benefits?.entries);
+    return { ...couponPicture(this.demo ? null : this.benefits, this.wheel.report), claimable };
+  }
+
+  // Activities with their participation route. Read-only: campaign-calendar and available-coupons.
+  async activities(onProgress = () => {}) {
+    if (this.demo) {
+      const now = Date.parse(this.dataset.campaigns?.capturedAt || this.now());
+      return { sample: true, offersComplete: true, rows: classifyActivities(activitiesFromSnapshot(this.dataset.campaigns?.events), { offers: this.dataset.offers?.offers || [], now }) };
+    }
+    const client = this.requireClient();
+    onProgress({ text: 'now-time-info → campaign-calendar …' });
+    const now = dateValue((await client.call('now-time-info')).data.datetime);
+    const calendar = (await client.call('campaign-calendar', {})).data;
+    onProgress({ text: 'available-coupons（只读，不领取）…' });
+    let offers = [], offersComplete = true;
+    try { offers = publicOffers((await client.call('available-coupons')).data); } catch { offersComplete = false; }
+    const heldNames = (this.benefits?.rows || []).filter((r) => r.kind === 'owned-coupon').map((r) => r.name);
+    return { sample: false, offersComplete, rows: classifyActivities(activitiesFromCalendar(calendar, now), { offers, heldNames, now }) };
+  }
+  // Minimal life-assistant profile for DeepSeek (this.profile holds only /set values).
+  userProfile() { return buildProfile({ history: this.history, preferences: this.preferences, request: this.request, now: this.now(), date: calendarContext(this.now()).date }); }
+  recordPick(plan) {
+    this.lastPick = plan;
+    this.lastReceipt = receiptFrom(plan, { storeName: this.store?.storeName, at: this.now(), report: this.wheel.report });
+  }
+  get report() { return this.wheel.report; }
+  fresh() { return this.wheel.fresh(); }
+  remainingSeconds() {
+    if (!this.wheel.report || this.wheel.report.sourceKind === 'demo-snapshot') return null;
+    return Math.max(0, Math.floor((this.wheel.validUntil - this.wheel.now()) / 1000));
+  }
+  requireFresh() {
+    if (!this.wheel.report) throw new TuiError('还没有核价结果，先 /price。');
+    if (!this.wheel.fresh()) throw new TuiError('报价已超过 5 分钟有效期或已失效，请重新 /price。');
+    if (!this.wheel.report.candidates.length) throw new TuiError('这次没有预算内的完整套餐候选，可调高预算或减少避开项后重新 /price。');
+    return this.wheel.report;
+  }
+
+  spin() { this.requireFresh(); const result = this.wheel.choose(); this.recordPick(result.plan); return result; }
+
+  async buddy({ mood = 'normal', local = false, signal, onStage } = {}) {
+    const report = this.requireFresh(), coupons = this.couponPicture().usable;
+    const result = await runAssistantAgents({ report, settings: structuredClone(this.preferences), context: { calendar: calendarContext(this.now()), weather: { ...this.weather } },
+      mood, client: local ? null : this.#deepseek, signal, onStage, fresh: () => this.wheel.report === report && this.wheel.fresh(),
+      profile: this.userProfile(), coupons, mainNames: this.mainNames });
+    const byId = new Map(report.candidates.map((p) => [p.id, p]));
+    this.recordPick(byId.get(result.choices[0].id));
+    return { ...result, coupons, plans: result.choices.map((c) => ({ ...byId.get(c.id), signals: c.signals, thought: c.thought, thoughtSource: c.thoughtSource })) };
+  }
+
+  feedback(vote) {
+    if (!this.lastPick) throw new TuiError('先让饭搭子或转盘挑出一份，再给反馈。');
+    this.preferences = learnFeedback(this.preferences, this.lastPick, vote, this.dataset.templates.mainProductCodes, calendarContext(this.now()).date);
+    return this.lastPick;
+  }
+
+  async radar() {
+    this.history = this.demo ? demoHistory() : await readHistory(this.requireClient(), this.dataset.templates.mainProductCodes);
+    return this.history;
+  }
+  // Main codes from completed orders on the previous `days` days. Fictional history never feeds requests.
+  recentMains(days = 2) {
+    if (this.history?.sourceKind !== 'official-history') return [];
+    const wanted = new Set(Array.from({ length: days }, (_, i) => shiftDay(this.history.anchorDay, -(i + 1))));
+    return [...new Set(this.history.orders.filter((o) => wanted.has(o.day)).flatMap((o) => o.mainCodes))];
+  }
+
+  async claim({ confirmed = false } = {}) {
+    if (confirmed !== true) throw new TuiError('领券需要明确确认。');
+    const client = this.requireClient();
+    this.invalidate(); this.benefits = null;
+    const data = (await client.claimAll()).data;
+    const ok = Number.isSafeInteger(data?.successCount) && data.successCount >= 0 ? data.successCount : null;
+    const failed = Number.isSafeInteger(data?.failedCount) && data.failedCount >= 0 ? data.failedCount : null;
+    return { successCount: ok, failedCount: failed };
+  }
+
+  async readWeather() {
+    if (!this.store?.city) throw new TuiError('先选择门店，天气只按门店所在城市查询。');
+    const [location] = await this.weatherClient.search(this.store.city);
+    if (!location) throw new TuiError('没有找到这个城市的天气位置。');
+    this.weather = await this.weatherClient.current(location); return this.weather;
+  }
+
+  close() { this.#mcp?.close(); this.#mcp = null; this.#deepseek?.close(); }
+}

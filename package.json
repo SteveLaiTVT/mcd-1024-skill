@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build_frontend.mjs",
     "test": "node --test tests/*.test.mjs",
-    "preview": "python3 scripts/serve_wheel.py"
+    "preview": "python3 scripts/serve_wheel.py",
+    "tui": "node tui/main.mjs"
   }
 }
