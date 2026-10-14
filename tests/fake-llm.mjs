@@ -7,6 +7,8 @@ const base = (slots = {}) => ({
   answer: null,
 });
 
+const pickWant = (text) => /鸡/.test(text) && !/牛肉/.test(text) ? '鸡肉' : /猪/.test(text) ? '猪肉' : /虾/.test(text) ? '虾' : /鱼/.test(text) ? '鱼' : /牛肉/.test(text) ? '牛肉' : null;
+
 export function intentFor(prompt) {
   const line = String(prompt || '').split('\n').find((l) => l.startsWith('本轮：')) || String(prompt || '');
   const text = line.replace(/^本轮：/, '');
@@ -14,11 +16,12 @@ export function intentFor(prompt) {
   const slots = { budget_yuan: budget ? Number(budget[1]) : null };
   if (/盲盒|随便来一餐|惊喜一下/.test(text)) return { ...base(slots), kind: 'blindbox' };
   if (/^(?:重试|再试一次|创建)$/.test(text.trim())) return { ...base(slots), kind: 'retry_order' };
+  // "想吃牛肉汉堡"是推荐请求，不是肉类问句：必须排在 info_meat 之前
+  if (/想吃|要吃/.test(text)) return { ...base({ ...slots, want: pickWant(text) }), kind: 'recommend' };
   if (/配料|有什么料|什么料/.test(text)) return { ...base(slots), kind: 'info_ingredients', ref: 'lastPick' };
   if (/套餐里有什么|里有什么|随心配有什么|有什么/.test(text) && /里有什么|套餐里|随心配/.test(text)) return { ...base(slots), kind: 'info_parts', ref: 'lastPick' };
   if (/牛肉|鸡肉|猪肉|虾|鱼|含不含|有没有肉/.test(text)) {
-    const want = /鸡/.test(text) && !/牛肉/.test(text) ? '鸡肉' : /猪/.test(text) ? '猪肉' : /虾/.test(text) ? '虾' : /鱼/.test(text) ? '鱼' : '牛肉';
-    return { ...base({ ...slots, want }), kind: 'info_meat', ref: 'lastPick' };
+    return { ...base({ ...slots, want: pickWant(text) }), kind: 'info_meat', ref: 'lastPick' };
   }
   if (/多少钱|什么价|价格/.test(text)) return { ...base(slots), kind: 'price_ask', ref: 'lastPick' };
   if (/这个看起来不错|吃这个|就吃这个了|就这个|就要这个|下单|买这个/.test(text) && !/不要|不是/.test(text)) return { ...base(slots), kind: 'confirm_pick', ref: 'lastPick' };
