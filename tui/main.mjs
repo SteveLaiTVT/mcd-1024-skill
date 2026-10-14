@@ -4,6 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { runTui } from './app.mjs';
 import { defaultProfilePath } from './allergy.mjs';
+import { defaultOrdersPath } from './orders.mjs';
 
 const args = new Set(process.argv.slice(2));
 if (args.has('--help') || args.has('-h')) {
@@ -14,15 +15,16 @@ if (args.has('--help') || args.has('-h')) {
   环境变量 DEEPSEEK_API_KEY   DeepSeek API key（需求理解 + 推荐 / 优化双 Agent，可选）
   --demo                      使用仓库内 2026-10-10 历史样本与虚构雷达，不联网
   --no-color                  关闭颜色（也支持 NO_COLOR 环境变量）
-  --no-profile                过敏记录只留在本次会话内存，不读写本地文件
+  --no-profile                过敏记录、提交和购物车只留在本次会话内存，不读写本地文件
 凭证只从进程环境读取，不会询问、显示或写入任何文件。
-过敏记录（/allergy）只保存在本机 ${defaultProfilePath()}，只用于本地筛选，从不发送。`);
+过敏记录（/allergy）只保存在本机 ${defaultProfilePath()}，只用于本地筛选，从不发送。
+提交与购物车（/commit /push /cart）只保存在本机 ${defaultOrdersPath()}；购物车不是真实订单，不下单、不付款。`);
   process.exit(0);
 }
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
 const [templates, plans, offers, campaigns, menu] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns', 'menu'].map(json));
 await runTui({ dataset: { templates, plans, offers, campaigns, menu }, demo: args.has('--demo'), color: args.has('--no-color') ? false : undefined,
-  profilePath: args.has('--no-profile') ? null : defaultProfilePath() });
+  profilePath: args.has('--no-profile') ? null : defaultProfilePath(), ordersPath: args.has('--no-profile') ? null : defaultOrdersPath() });
 // Keep-alive sockets from fetch can hold the event loop briefly; nothing else is pending.
 process.exit(0);

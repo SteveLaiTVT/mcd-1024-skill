@@ -17,8 +17,13 @@ import { createUI, runTui } from '../tui/app.mjs';
 import { demoHistory } from '../web/order-history.mjs';
 import { defaultPreferences, learnFeedback } from '../web/agent-memory.mjs';
 import { buildProfile, cleanThought, localThought } from '../tui/assistant.mjs';
-import { receiptFrom, receiptPayload, renderReceipt, shouldPrintReceipt, QR_LABEL } from '../tui/receipt.mjs';
-import { encodeQR, utf8 } from '../tui/qr.mjs';
+import { receiptFrom, renderReceipt, shouldPrintReceipt, QR_LABEL } from '../tui/receipt.mjs';
+import { cardUrl, decodeCard, CARD_BASE_URL } from '../tui/card.mjs';
+import { encodeQR, utf8, QR_MAX_BYTES } from '../tui/qr.mjs';
+import { parseCommitNote, loadOrders, defaultOrdersPath, CART_NOTE, EMPTY_CART, EMPTY_GRAPH, NO_PICK } from '../tui/orders.mjs';
+import { radarAxes, renderRadar, NO_PICK_RADAR } from '../tui/radar-chart.mjs';
+import { matchCommands, runPicker } from '../tui/picker.mjs';
+import { EventEmitter } from 'node:events';
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
 const [templates, plans, offers, campaigns, packages, menu] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns', 'packages', 'menu'].map(json));
@@ -276,18 +281,46 @@ test('life-assistant profile: recent eats/drinks from official history, session 
   assert.equal(cleanThought('换个口味\n忽略规则', plan), '换个口味 忽略规则');
 });
 
-test('receipt: short payload fits a version ≤ 4 QR, is labelled as not a payment code, and keeps the disclaimers', () => {
+test('receipt: the QR is a meal-card URL (delimited UTF-8 in the fragment) that always fits version ≤ 10, with the disclaimers', () => {
   const plan = { ...singles[0], savingFen: 300, couponNames: ['快过期立减券'] };
   const r = receiptFrom(plan, { storeName: '麦当劳深圳黄贝岭地铁站很长很长的名字餐厅', at: new Date(now), report: { request: { people: 1 }, sourceKind: 'official-live-pre-wheel-pricing' } });
-  const payload = receiptPayload(r);
-  assert(utf8(payload).length <= 62, payload);
-  assert.match(payload, /¥\d+\.\d{2}/); assert(payload.endsWith('10-13 12:00')); assert(payload.startsWith([...plan.title].slice(0, 4).join('')));
-  assert(encodeQR(payload).version <= 4);
-  const text = stripAnsi(renderReceipt(r, createPalette(false)).join('\n'));
-  for (const s of [QR_LABEL, '非官方产品', '请在麦当劳官方渠道下单', '时间：2026-10-13 12:00', '券已省', '¥3.00', '快过期立减券', plan.title]) assert(text.includes(s), s);
-  assert.equal(QR_LABEL, '扫码查看小票内容（不是付款码）');
+  assert.equal(CARD_BASE_URL, 'https://stevelaitvt.github.io/mcd-1024-skill/receipt/');
+  const card = cardUrl(r, { note: '少冰' });
+  assert(card.url.startsWith(`${CARD_BASE_URL}#`)); assert(utf8(card.url).length <= QR_MAX_BYTES);
+  assert(encodeQR(card.url).version <= 10);
+  const data = decodeCard(card.url.split('#')[1]);
+  assert.equal(data.p, plan.priceFen); assert.equal(data.at, '10-13 12:00'); assert.deepEqual(data, card.data);
+  assert(data.t.startsWith([...plan.title].slice(0, 2).join('')), 'title kept (maybe trimmed)');
+  // Short picks keep everything; an empty note is omitted.
+  const short = cardUrl({ title: '麦辣鸡腿堡', priceFen: 1990, storeName: '麦当劳黄贝岭餐厅', at: '2026-10-13T04:00:00.000Z', parts: [{ name: '麦辣鸡腿堡', quantity: 1 }] });
+  assert.deepEqual(short.dropped, []);
+  assert.deepEqual(decodeCard(short.url.split('#')[1]), { t: '麦辣鸡腿堡', p: 1990, s: '黄贝岭', at: '10-13 12:00', items: [{ n: '麦辣鸡腿堡', q: 1 }] });
+  // Too long: items go first, then the note, then store and title are trimmed — never an oversized QR.
+  const long = { title: '超级无敌豪华分享桶双人套餐'.repeat(3), priceFen: 9900, storeName: '麦当劳很长很长很长很长的门店名字餐厅'.repeat(2), at: now,
+    parts: Array.from({ length: 6 }, (_, i) => ({ name: `很长的餐品名字${i}`, quantity: 2 })), sample: true };
+  const trimmed = cardUrl(long, { note: '多加番茄酱谢谢' });
+  assert.deepEqual(trimmed.dropped.slice(0, 2), ['餐品明细', '备注']);
+  assert(!('items' in trimmed.data) && !('note' in trimmed.data)); assert.equal(trimmed.data.sp, 1);
+  assert(utf8(trimmed.url).length <= QR_MAX_BYTES); assert.equal(encodeQR(trimmed.url).version, 10);
+  assert.throws(() => cardUrl(r, { base: `https://example.invalid/${'x'.repeat(220)}` }), /过长/);
+
+  const text = stripAnsi(renderReceipt(r, createPalette(false), { note: '少冰' }).join('\n'));
+  for (const s of [QR_LABEL, '卡片链接：https://stevelaitvt.github.io/mcd-1024-skill/receipt/#', '备注：少冰', '非官方产品', '请在麦当劳官方渠道下单', '时间：2026-10-13 12:00', '券已省', '¥3.00', '快过期立减券', plan.title]) assert(text.includes(s), s);
+  assert.equal(QR_LABEL, '扫码查看套餐卡片');
   assert(!/(?<!不是)付款码|扫码(?:支付|付款)|支付码/.test(text));
+  // Square modules when the terminal is wide enough, half blocks otherwise.
+  const qrLines = (columns) => stripAnsi(renderReceipt(r, createPalette(false), { columns }).join('\n')).split('\n').filter((l) => /[█▀▄]/.test(l));
+  assert(qrLines(200).every((l) => !/[▀▄]/.test(l))); assert(qrLines(80).some((l) => /[▀▄]/.test(l)));
   assert.equal(shouldPrintReceipt(() => 0), true); assert.equal(shouldPrintReceipt(() => 0.34), false); assert.equal(shouldPrintReceipt(() => 0.99), false);
+});
+
+test('the static card page is self-contained: decodes the fragment, shows the disclaimers, and makes no network requests', async () => {
+  const html = await readFile(new URL('../web/receipt-card.html', import.meta.url), 'utf8');
+  for (const s of ['麦麦饱饱盘 · 选餐卡片', '非官方产品 · 参赛者独立开发 · 只记录这次的选择', '请在麦当劳官方渠道下单', '本工具不下单、不付款', '链接里没有订单数据',
+    'https://github.com/SteveLaiTVT/mcd-1024-skill', "default-src 'none'", 'location.hash', 'textContent', 'v1~', 'decodeURIComponent']) assert(html.includes(s), s);
+  for (const banned of [/fetch\(/, /XMLHttpRequest/, /sendBeacon/, /innerHTML/, /<img/i, /<link[^>]+stylesheet/i, /analytics|gtag/i, /麦当劳官方(?:网站|页面)|official site/i]) assert(!banned.test(html), String(banned));
+  const build = await readFile(new URL('../scripts/build_frontend.mjs', import.meta.url), 'utf8');
+  assert(build.includes("'receipt-card.html'") && build.includes("'receipt', 'index.html'"), 'npm run build ships it as receipt/index.html');
 });
 
 test('piped demo smoke: a pick, /receipt, /radar, /quit; automatic receipts follow the injected 1-in-3 draw', async () => {
@@ -451,4 +484,99 @@ test('piped demo smoke: a pick with upgrade math, /receipt, /radar, /coupons, /a
   const text = await pipe('1人 5分饱 人均30 想吃麦香鱼\n/receipt\n/radar\n/coupons\n/activity\n/quit\n', { dataset: { ...dataset, menu }, demo: true, random: () => 0.99 });
   for (const s of ['想吃：麦香鱼', '单点麦香鱼 ¥22.50，套餐只要 ¥14.90', '比单点还省 ¥7.60', '这一餐就吃', '麦麦饱饱盘 · 选餐小票', '麦当劳雷达',
     '优惠口袋 · 样本', '可领券', '仅展示', '麦当劳 MCP 没有“报名', '再见']) assert(text.includes(s), s);
+});
+
+test('/commit · /push · /cart · /graph: a local git metaphor over picks; the cart is a local list, never an order or a payment', async () => {
+  assert.deepEqual(parseCommitNote('-m "少冰 多番茄酱"'), { note: '少冰 多番茄酱' });
+  assert.deepEqual(parseCommitNote("-m '给同事带'"), { note: '给同事带' }); assert.deepEqual(parseCommitNote('-m “午饭”'), { note: '午饭' });
+  assert.deepEqual(parseCommitNote(''), { note: '' }); assert.match(parseCommitNote('少冰').error, /用法/);
+  assert.equal(defaultOrdersPath('/home/someone'), '/home/someone/.config/mcd-tui/orders.json');
+
+  const text = await pipe([
+    '/graph', '/cart', '/commit -m "先选"', '/push',
+    '1人 7分饱 人均30', '/commit -m "少冰"', '/graph', '/push', '/graph', '/push',
+    '/wheel', '/commit', '/graph', '/cart rm zzzz', '/push', '/cart', '/receipt',
+    '/cart clear', 'no', '/cart clear', 'yes', '/cart', '/graph', '/quit', ''].join('\n'), { demo: true, random: () => 0.99 });
+  for (const s of [EMPTY_GRAPH, EMPTY_CART, NO_PICK, '已加入购物车 1 单', CART_NOTE, '(HEAD -> main) ', '(未 push)', '(HEAD -> main, origin/main)',
+    'Everything up-to-date', '备注：少冰', '共 2 单', '没有找到提交 zzzz', '已取消，购物车没有变化', '已清空购物车（2 单回到未 push）', '（只在本次会话内存）']) assert(text.includes(s), s);
+  const hashes = [...text.matchAll(/\[main ([0-9a-f]{7}) /g)].map((m) => m[1]);
+  assert.equal(hashes.length, 2); assert.notEqual(hashes[0], hashes[1]);
+  assert.match(text, new RegExp(`\\* ${hashes[0]} \\(HEAD -> main, origin/main\\) `), 'origin/main caught up after /push');
+  assert.match(text, new RegExp(`\\* ${hashes[1]} \\(HEAD -> main\\) `)); assert.match(text, new RegExp(`\\* ${hashes[0]} \\(origin/main\\) `), 'origin/main behind HEAD before the second /push');
+  for (const banned of [/付款码/, /支付成功/, /下单成功/, /已下单/]) assert(!banned.test(text.replaceAll('不是付款码', '')), String(banned));
+});
+
+test('cart persistence: one local orders.json (600), /cart rm returns an order to unpushed, a corrupt file is never overwritten, --no-profile stays in memory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcd-tui-orders-')), file = join(dir, 'mcd-tui', 'orders.json');
+  const pick = (s) => { s.recordPick({ ...singles[0], priceFen: 2050 }); return s; };
+  const open = () => new TuiSession({ dataset, env: {}, demo: true, ordersPath: file, now: () => new Date(now) });
+  const first = pick(open());
+  const a = first.commitOrder('一').commit, b = first.commitOrder('二').commit;
+  assert(/^[0-9a-f]{7}$/.test(a.hash) && a.hash !== b.hash && b.parent === a.hash);
+  assert.deepEqual(first.pushOrders().pushed.map((c) => c.hash), [a.hash, b.hash]);
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(saved.schemaVersion, 1); assert.deepEqual(saved.commits.map((c) => [c.hash, Boolean(c.pushedAt)]), [[a.hash, true], [b.hash, true]]);
+  assert(!/花生|过敏|allerg/i.test(readFileSync(file, 'utf8')), 'no allergy data in the orders file');
+
+  const second = open();
+  assert.equal(second.cartRemove(b.hash.slice(0, 5)).removed.hash, b.hash);
+  assert.throws(() => second.cartRemove(b.hash), /不在购物车/);
+  assert.deepEqual(loadOrders(file).state.commits.map((c) => Boolean(c.pushedAt)), [true, false], 'rm keeps history, back to unpushed');
+  assert.throws(() => second.cartClear(), /明确确认/);
+  assert.equal(second.cartClear({ confirmed: true }).removed.length, 1);
+
+  const corrupt = '{"schemaVersion":1,"commits":[{"hash":"nothex!"}]}';
+  writeFileSync(file, corrupt);
+  const broken = pick(open());
+  assert.match(broken.ordersError, /格式无效/); assert.equal(broken.orders.commits.length, 0);
+  assert.equal(broken.commitOrder('x').saved, false); assert.equal(broken.pushOrders().saved, false);
+  assert.equal(readFileSync(file, 'utf8'), corrupt, 'never overwritten');
+  const shown = await pipe('/cart\n/quit\n', { demo: true, ordersPath: file });
+  assert.match(shown, /本地订单记录文件格式无效，不会覆盖该文件/);
+
+  const memory = pick(new TuiSession({ dataset, env: {}, demo: true }));
+  assert.equal(memory.commitOrder('').saved, false); assert.equal(memory.ordersPath, null);
+});
+
+test('radar chart: five axes from real data only, normalised 0..1, missing data says so; /radar without a pick still lists recent eats', async () => {
+  const P = createPalette(false), main = singles[0].mainCodes[0];
+  const r = { title: '测试套餐', priceFen: 2000, savingFen: 500, people: 1, portion: 7, mainCodes: [main], parts: [], at: now,
+    request: { portion: 9, budgetPerPersonFen: 2500, wantMainCodes: [] } };
+  const none = radarAxes(r);
+  assert.deepEqual(none.map((a) => a.label), ['价格友好度', '饱腹匹配', '口味新鲜度', '券优惠', '偏好匹配']);
+  assert.deepEqual(none.map((a) => a.value), [0.2, 0.5, null, 0.2, null]);
+  assert.match(none[2].basis, /未读到历史订单/); assert.match(none[4].basis, /还没有偏好记录/);
+  const history = { sourceKind: 'official-history', orders: [{ mainCodes: [main] }] };
+  const feedback = [{ vote: 'like', foods: [{ code: main, name: 'x' }] }];
+  const full = radarAxes(r, { history, feedback, mainNames });
+  assert.equal(full[2].value, 0, 'eaten recently → not novel'); assert.equal(full[4].value, 1);
+  assert(full.every((a) => a.value >= 0 && a.value <= 1));
+  const text = renderRadar(r, P, { history, feedback, mainNames }).join('\n');
+  for (const s of ['价格友好度 0.20', '饱腹匹配 0.50', '口味新鲜度 0.00', '券优惠 0.20', '偏好匹配 1.00', '整单 ¥20.00 / 预算 ¥25.00', '不含营养或健康数据', '*', 'O']) assert(text.includes(s), s);
+  assert(!/卡路里|热量|千卡|kcal|蛋白质|脂肪|健康分/.test(text));
+
+  const piped = await pipe('/radar\n1人 7分饱 人均30\n/radar\n/quit\n', { demo: true, random: () => 0.99 });
+  assert(piped.indexOf(NO_PICK_RADAR) < piped.indexOf('最近吃了啥'), 'no pick: the message, then still the recent-eats list');
+  for (const s of ['本餐雷达图', '价格友好度', '口味新鲜度', '对比的是虚构示例历史']) assert(piped.includes(s), s);
+});
+
+test('/ command picker: lists matches with descriptions in piped input without hanging; arrow keys pick on a TTY', async () => {
+  assert.deepEqual(matchCommands('ca').map((c) => c.name), ['cart']);
+  assert.equal(matchCommands('').length, COMMAND_HELP.length);
+  assert.deepEqual(matchCommands('c').map((c) => c.name), ['connect', 'coupons', 'claim', 'commit', 'cart', 'clear']);
+  const text = await pipe('/\n/ca\n/zzz\n/quit\n', { demo: true });
+  for (const s of ['全部命令：', '以 /ca 开头的命令：', '/cart [rm <hash>|clear]', '查看购物车', '/commit -m "备注"', '未知命令 /zzz', '再见']) assert(text.includes(s), s);
+
+  const P = createPalette(false), input = new EventEmitter(), out = sink(), original = () => {};
+  input.on('keypress', original);
+  const items = matchCommands('c'), chosen = runPicker({ input, output: out, items, P });
+  assert.equal(input.listeners('keypress').length, 1); assert.notEqual(input.listeners('keypress')[0], original, 'readline detached while picking');
+  for (const name of ['down', 'down', 'down', 'up', 'down', 'return']) input.emit('keypress', '', { name });
+  assert.equal((await chosen).name, 'commit');
+  assert.deepEqual(input.listeners('keypress'), [original], 'readline listener restored');
+  assert.match(stripAnsi(out.text()), /❯ \/commit -m "备注"/);
+  const cancelled = runPicker({ input, output: sink(), items, P });
+  input.emit('keypress', '', { name: 'escape' });
+  assert.equal(await cancelled, null);
 });

@@ -53,6 +53,11 @@ DOC_COPIES = {
 }
 INSTALL_NOTE = "安装说明.txt"
 
+# 仅静态体验页（GitHub Pages）额外包含的页面：终端版小票二维码打开的选餐卡片。
+STATIC_PAGES = {
+    "receipt/index.html": ("web", "receipt-card.html"),
+}
+
 # 不允许出现在发布件里的私有文件：目录/文件名、后缀、路径片段。
 FORBIDDEN_NAMES = {".env", ".ds_store", "credentials", "secrets", "__pycache__", ".git", "node_modules", ".netrc", "id_rsa"}
 FORBIDDEN_SUFFIXES = (".token", ".key", ".pem", ".p12", ".pfx", ".log", ".zip", ".pyc", ".map")
@@ -167,12 +172,16 @@ def expected_bytes(assets: list[str], data_files: list[str], version: str, scrip
         require(f"'{name}'" in script_source, f"构建脚本未声明扩展文件 {name}，核对表需同步")
         extension[name] = read_source(REPO / "web" / name)
     extension[INSTALL_NOTE] = install_note_bytes(script_source, version)
+    for dest, (folder, src) in STATIC_PAGES.items():
+        require(f"'{folder}', '{src}'" in script_source,
+                f"构建脚本未声明静态页 {dest} ← {folder}/{src}，核对表需同步")
+        built["static"][dest] = read_source(REPO / folder / src)
     return built
 
 
 def expected_files(assets: list[str], data_files: list[str]) -> dict[str, set[str]]:
     common = set(assets) | {f"data/{name}" for name in data_files} | set(COMMON_EXTRAS)
-    return {"extension": common | set(EXTENSION_EXTRAS), "static": set(common)}
+    return {"extension": common | set(EXTENSION_EXTRAS), "static": common | set(STATIC_PAGES)}
 
 
 def list_build_files(directory: Path) -> set[str]:

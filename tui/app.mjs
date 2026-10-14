@@ -3,13 +3,16 @@ import readline from 'node:readline';
 import { MCPError } from '../web/mcp-client.mjs';
 import { DeepSeekError } from '../web/deepseek-client.mjs';
 import { budgetFen } from '../web/meal-engine.mjs';
-import { createPalette, box, fit, padEnd } from './ansi.mjs';
+import { createPalette, box, fit, padEnd, money } from './ansi.mjs';
 import { TuiSession, TuiError } from './session.mjs';
 import { runAgentFlow } from './agent-flow.mjs';
 import { NOTICE, statusLine, renderStores, renderBenefits, renderReport, renderPick, renderAgentResult, renderHeatmap, helpLines, renderClaimable, renderAllergies, renderActivities, HELP_COMMANDS } from './render.mjs';
 import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery } from './intent.mjs';
 import { parseAllergyStatement } from './allergy.mjs';
 import { printReceipt, maybeReceipt } from './receipt.mjs';
+import { parseCommitNote, renderGraph, renderCart, commitLine, headOf, cartOf, unpushed, CART_USAGE } from './orders.mjs';
+import { renderRadar, NO_PICK_RADAR } from './radar-chart.mjs';
+import { matchCommands, pickerLines, runPicker } from './picker.mjs';
 
 const message = (e) => e instanceof TuiError || e instanceof MCPError || e instanceof DeepSeekError ? e.message : `未完成：${e?.message || e}`;
 
@@ -22,6 +25,8 @@ export function createUI({ output, palette, redact, tty }) {
   const indent = (lines) => lines.forEach((l) => write(`   ${l}`));
   return {
     palette, write, width,
+    // Terminal columns for the receipt QR: square modules when they fit, half blocks otherwise.
+    columns: () => output.columns || 80,
     clear() { if (tty) output.write('\x1b[2J\x1b[H'); },
     panel(title, lines, tone) { write(box(title, lines, { width: width(), palette, tone })); },
     result(title, lines, tone = 'brand') { write(''); write(box(title, lines, { width: width(), palette, tone })); },
@@ -48,14 +53,14 @@ export function createUI({ output, palette, redact, tty }) {
   };
 }
 
-export async function runTui({ dataset, input = process.stdin, output = process.stdout, env = process.env, demo = false, color, session: provided, autoConnect = true, random, profilePath = null }) {
+export async function runTui({ dataset, input = process.stdin, output = process.stdout, env = process.env, demo = false, color, session: provided, autoConnect = true, random, profilePath = null, ordersPath = null }) {
   const tty = Boolean(input.isTTY && output.isTTY);
   const palette = createPalette(color ?? (Boolean(output.isTTY) && !env.NO_COLOR));
-  const session = provided || new TuiSession({ dataset, env, demo, profilePath, ...(random ? { random } : {}) });
+  const session = provided || new TuiSession({ dataset, env, demo, profilePath, ordersPath, ...(random ? { random } : {}) });
   const ui = createUI({ output, palette, redact: (t) => session.redact(t), tty });
   const P = palette;
   const rl = readline.createInterface({ input, output: tty ? output : undefined, terminal: tty, historySize: 200 });
-  const queue = []; let waiting = null, closed = false, pendingStores = null, controller = null, busy = false;
+  const queue = []; let waiting = null, closed = false, pendingStores = null, controller = null, busy = false, prefill = '';
   rl.on('line', (line) => { if (waiting) { const w = waiting; waiting = null; w(line); } else queue.push(line); });
   rl.on('close', () => { closed = true; if (waiting) { const w = waiting; waiting = null; w(null); } });
   let interrupted = false;
@@ -67,7 +72,8 @@ export async function runTui({ dataset, input = process.stdin, output = process.
   const nextLine = (prompt) => {
     if (queue.length) { const line = queue.shift(); if (!tty) ui.write(`${P.brand(prompt)}${line}`); return Promise.resolve(line); }
     if (closed) return Promise.resolve(null);
-    rl.setPrompt(P.brand(prompt)); if (tty) rl.prompt();
+    rl.setPrompt(P.brand(prompt));
+    if (tty) { rl.prompt(); if (prefill) { rl.write(prefill); prefill = ''; } }
     return new Promise((resolve) => { waiting = (line) => { if (!tty && line !== null) ui.write(`${P.brand(prompt)}${line}`); resolve(line); }; });
   };
 
@@ -162,8 +168,48 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     },
     receipt() {
       if (!session.lastReceipt) return ui.error('还没有挑出的套餐：先说一句话、/wheel 或 /buddy，再 /receipt。');
-      printReceipt(ui, session.lastReceipt);
+      // Once this pick is committed, its card carries the commit note too.
+      const head = headOf(session.orders);
+      printReceipt(ui, session.lastReceipt, { note: head && head.pickedAt === session.lastReceipt.at ? head.note : '' });
     },
+    commit(args, rest) {
+      const parsed = parseCommitNote(rest);
+      if (parsed.error) return ui.error(parsed.error);
+      try {
+        const { commit, saved } = session.commitOrder(parsed.note);
+        ui.write(`${P.green('✓')} [main ${commitLine(commit, P)}]`);
+        ui.write(P.gray(`  本地提交${ordersNote(saved)}；${unpushed(session.orders).length} 个未 push · /push 加入购物车 · /graph 看历史`));
+      } catch (e) { ui.error(message(e)); }
+    },
+    push() {
+      try {
+        const { pushed, saved } = session.pushOrders();
+        if (!pushed.length) ui.info('Everything up-to-date：没有未 push 的提交，购物车不变。');
+        else ui.write(`${P.green('✓')} 已加入购物车 ${pushed.length} 单：${pushed.map((c) => P.yellow(c.hash)).join(' ')} → origin/main${ordersNote(saved)}`);
+        ui.panel('购物车（本地清单）', renderCart(session.orders, P), 'yellow');
+      } catch (e) { ui.error(message(e)); }
+    },
+    async cart(args) {
+      const [sub, ref] = args;
+      try {
+        if (sub === 'rm') {
+          if (!ref) return ui.error(CART_USAGE);
+          const { removed, saved } = session.cartRemove(ref);
+          ui.info(`已移出购物车：${removed.hash} ${removed.title}（回到未 push，历史保留）${ordersNote(saved)}`);
+        } else if (sub === 'clear') {
+          const cart = cartOf(session.orders);
+          if (!cart.length) return ui.panel('购物车（本地清单）', renderCart(session.orders, P), 'yellow');
+          ui.panel('清空购物车', [`购物车里有 ${cart.length} 单，合计 ${money(cart.reduce((s, c) => s + c.priceFen, 0))}。清空后它们回到未 push，提交历史保留。`,
+            P.bold('确认清空请输入 yes，其他任何输入都会取消。')], 'yellow');
+          const answer = await nextLine('确认清空？> ');
+          if (answer?.trim().toLowerCase() !== 'yes') return ui.info('已取消，购物车没有变化。');
+          const { removed, saved } = session.cartClear({ confirmed: true });
+          ui.info(`已清空购物车（${removed.length} 单回到未 push）${ordersNote(saved)}`);
+        } else if (sub) return ui.error(CART_USAGE);
+      } catch (e) { return ui.error(message(e)); }
+      ui.panel('购物车（本地清单）', renderCart(session.orders, P), 'yellow');
+    },
+    graph: () => ui.panel('提交历史 · git log --graph', renderGraph(session.orders, P)),
     async buddy(args) {
       const mood = args.find((a) => MOODS.includes(a)) || 'normal', local = args.includes('local') || !session.hasDeepSeek;
       const step = ui.begin(local ? '本地偏好推荐' : '饭搭子双 Agent（DeepSeek）');
@@ -172,7 +218,7 @@ export async function runTui({ dataset, input = process.stdin, output = process.
         const result = await session.buddy({ mood, local, signal: controller.signal, onStage: (role) => step.progress(role === 'recommend' ? '推荐 Agent 挑选中…' : '优化 Agent 复核中…') });
         step.ok(result.source === 'deepseek' ? `${result.rounds} 轮完成` : '');
         ui.result('饭搭子推荐', renderAgentResult(result, P, { report: session.report, remaining: session.remainingSeconds() }));
-        ui.write(P.gray('/like 喜欢这份 · /less 以后少推荐（只在本次会话内存）· /receipt 小票'));
+        ui.write(P.gray('/like 喜欢这份 · /less 以后少推荐（只在本次会话内存）· /receipt 小票 · /commit -m "备注" 记下这一餐'));
         maybeReceipt(ui, session);
       } catch (e) { step.fail(message(e)); }
       finally { controller = null; }
@@ -198,8 +244,12 @@ export async function runTui({ dataset, input = process.stdin, output = process.
       if (!session.history || args.includes('refresh')) {
         const step = ui.begin('读取历史订单（order-list）');
         try { step.progress('now-time-info → order-list …'); await session.radar(); step.ok(`${session.history.orders.length} 笔已完成订单`); }
-        catch (e) { return step.fail(message(e)); }
+        catch (e) { step.fail(message(e)); }
       }
+      // Spider chart of the current pick first; without history its novelty axis says so instead of guessing.
+      if (session.lastReceipt) ui.panel('本餐雷达图', renderRadar(session.lastReceipt, P, { history: session.history, feedback: session.preferences.feedback, mainNames: session.mainNames }));
+      else ui.info(NO_PICK_RADAR);
+      if (!session.history) return;
       try { ui.panel(`麦当劳雷达 · ${mode === 'year' ? '全年' : '近 12 周'}`, renderHeatmap(session.history, P, { mode, year })); }
       catch (e) { ui.error(message(e)); }
       const recent = session.recentMains(2);
@@ -238,6 +288,7 @@ export async function runTui({ dataset, input = process.stdin, output = process.
   const drift = [...Object.keys(commands).filter((k) => !HELP_COMMANDS.has(k)), ...[...HELP_COMMANDS].filter((k) => !commands[k])];
   if (drift.length) throw new Error(`命令表与 /help 不一致：${drift.join(', ')}`);
 
+  const ordersNote = (ok) => ok ? `（已保存到本机 ${session.ordersPath}）` : session.ordersError ? `（${session.ordersError}，只在本次会话内生效）` : '（只在本次会话内存）';
   const savedNote = (ok) => ok ? `（已保存到本机 ${session.profilePath}）` : session.profileError ? `（${session.profileError}，只在本次会话内生效）` : '（只在本次会话内存）';
   function confirmAllergyAdd(r, tokens) {
     if (r.added.length) ui.info(`已记录过敏：${r.added.join('、')}${savedNote(r.saved)}。之后在本地排除名称含相关关键词或成分不明的餐品；不会发送给 DeepSeek 或 MCP。`);
@@ -252,6 +303,16 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     ui.info(`已选择 ${item.storeName}（到店自取）。接下来 /coupons、/price，或直接输入一句话。`);
   }
 
+  // '/' or an unfinished '/partial': list the matching commands. On a TTY the arrow-key menu
+  // pre-fills the choice at the next prompt; piped input just gets the list and carries on.
+  async function pickCommand(prefix, matches) {
+    ui.write(P.gray(prefix ? `以 /${prefix} 开头的命令：` : '全部命令：'));
+    if (!tty) { pickerLines(matches, P).forEach((l) => ui.write(l)); return; }
+    const choice = await runPicker({ input, output, items: matches, P });
+    if (choice) prefill = `/${choice.name} `;
+    else ui.info('已取消。');
+  }
+
   async function handle(line) {
     const text = line.trim();
     if (!text) return;
@@ -259,8 +320,12 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     if (text.startsWith('/')) {
       const [name, ...args] = text.slice(1).split(/\s+/);
       const command = commands[name.toLowerCase()];
-      if (!command) return ui.error(`未知命令 /${name}，输入 /help 查看。`);
-      return command(args);
+      if (!command) {
+        const matches = args.length ? [] : matchCommands(name);
+        if (!matches.length) return ui.error(`未知命令 /${name}，输入 /help 查看。`);
+        return pickCommand(name, matches);
+      }
+      return command(args, text.slice(1 + name.length).trim());
     }
     // Allergy statements are recorded locally and never reach the intent agent.
     const allergy = parseAllergyStatement(text);
@@ -288,6 +353,7 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     `默认选店区域：${P.bold(DEFAULT_STORE_SEARCH.label)}${session.demo ? P.gray('（样本模式不搜索，用样本门店）') : ''}`,
     `默认餐量：${DEFAULT_INTENT.people} 人 · ${DEFAULT_INTENT.portion} 分饱 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}`,
     `过敏记录：${session.allergies.length ? P.bold(session.allergies.join('、')) : '无'}${session.profileError ? P.red(`（${session.profileError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机，本地筛选，从不发送；/allergy 管理）')}`,
+    `购物车：${cartOf(session.orders).length} 单 · 未 push ${unpushed(session.orders).length} 个提交${session.ordersError ? P.red(`（${session.ordersError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机；不是真实订单，/cart 查看）')}`,
     P.gray('指令里写明的人数 / 食量 / 预算 / 位置（@城市 关键词）优先；/set、/store 也会覆盖默认。'),
     P.gray('输入 /help 查看命令；不下单、不付款，领券需明确确认。'),
   ]);

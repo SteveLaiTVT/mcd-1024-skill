@@ -24,6 +24,9 @@ mcp-config.local.json
 mcd-tui/
 profile.json
 *.profile.json
+# 终端版本地提交与购物车（/commit /push /cart）：默认在 ~/.config/mcd-tui/orders.json，只是本地清单，不得提交
+orders.json
+*.orders.json
 
 # 本地数据与产物
 data/local/

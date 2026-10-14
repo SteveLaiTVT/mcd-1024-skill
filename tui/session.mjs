@@ -14,6 +14,7 @@ import { receiptFrom } from './receipt.mjs';
 import { alaCarteMains, demoAlaCarte, liveAlaCarte, mergeAlaCarte, applyUpgrades } from './pricing.mjs';
 import { applyAllergyFilter, normalizeAllergens, loadProfile, saveProfile } from './allergy.mjs';
 import { activitiesFromCalendar, activitiesFromSnapshot, classifyActivities } from './activity.mjs';
+import { emptyOrders, loadOrders, saveOrders, createCommit, headOf, unpushed, cartOf, findCommit, NO_PICK, EMPTY_GRAPH } from './orders.mjs';
 
 export class TuiError extends Error {}
 
@@ -21,13 +22,20 @@ export class TuiSession {
   #mcdToken; #deepseekKey; #mcp = null; #deepseek = null; #allergies = [];
   // profilePath: local JSON for allergy memory; null keeps it in memory only (tests, or no home directory).
   constructor({ dataset, env = process.env, demo = false, mcpFactory = (t) => new MCPClient(t), deepseekFactory = (k) => new DeepSeekClient(k),
-    weatherClient = new WeatherClient(), now = () => new Date(), wheel = new WheelSession(), random = Math.random, profilePath = null }) {
+    weatherClient = new WeatherClient(), now = () => new Date(), wheel = new WheelSession(), random = Math.random, profilePath = null, ordersPath = null }) {
     this.profilePath = profilePath; this.profileError = '';
     if (profilePath) {
       const loaded = loadProfile(profilePath);
       this.#allergies = loaded.allergies;
       // A file we could not read is never overwritten: the user must fix or remove it first.
       if (loaded.error) this.profileError = loaded.error;
+    }
+    // Local order commits and cart (/commit, /push, /cart, /graph); same rules as the allergy file. null keeps them in memory.
+    this.ordersPath = ordersPath; this.ordersError = ''; this.orders = emptyOrders();
+    if (ordersPath) {
+      const loaded = loadOrders(ordersPath);
+      this.orders = loaded.state;
+      if (loaded.error) this.ordersError = loaded.error;
     }
     this.#mcdToken = String(env.MCD_TOKEN || '').trim();
     this.#deepseekKey = String(env.DEEPSEEK_API_KEY || '').trim();
@@ -113,6 +121,44 @@ export class TuiSession {
     if (!this.profilePath || this.profileError) return false;
     try { saveProfile(this.profilePath, { allergies: this.#allergies }); return true; }
     catch { throw new TuiError('过敏记录没能写入本地文件，本次会话内仍然生效；请检查 ~/.config/mcd-tui 的权限。'); }
+  }
+
+  // Records the current pick (the last '这一餐就吃') as a local commit. Never an order or a payment.
+  commitOrder(note = '') {
+    if (!this.lastReceipt) throw new TuiError(NO_PICK);
+    const commit = createCommit(this.lastReceipt, { note, at: this.now(), parent: headOf(this.orders)?.hash || null, taken: new Set(this.orders.commits.map((c) => c.hash)) });
+    this.orders = { commits: [...this.orders.commits, commit] };
+    return { commit, saved: this.#saveOrders() };
+  }
+  // Adds every unpushed commit to the local cart (origin/main catches up to HEAD). Returns { pushed, saved }; pushed is [] when up to date.
+  pushOrders() {
+    if (!this.orders.commits.length) throw new TuiError(EMPTY_GRAPH);
+    const pending = new Set(unpushed(this.orders).map((c) => c.hash)), at = new Date(this.now()).toISOString();
+    if (!pending.size) return { pushed: [], saved: this.#ordersPersisted() };
+    this.#setOrders(this.orders.commits.map((c) => pending.has(c.hash) ? { ...c, pushedAt: at } : c));
+    return { pushed: this.orders.commits.filter((c) => pending.has(c.hash)), saved: this.#saveOrders() };
+  }
+  // Takes one order out of the cart: it goes back to unpushed and stays in the history.
+  cartRemove(ref) {
+    const hit = findCommit(this.orders, ref);
+    if (!hit) throw new TuiError(`没有找到提交 ${ref || ''}；用 /cart 或 /graph 查看 hash。`);
+    if (!hit.pushedAt) throw new TuiError(`${hit.hash} 不在购物车里（还没 /push）。`);
+    this.#setOrders(this.orders.commits.map((c) => c === hit ? (({ pushedAt, ...rest }) => rest)(c) : c));
+    return { removed: hit, saved: this.#saveOrders() };
+  }
+  // Empties the cart; every order goes back to unpushed. The caller must have a typed 'yes'.
+  cartClear({ confirmed = false } = {}) {
+    if (confirmed !== true) throw new TuiError('清空购物车需要明确确认。');
+    const removed = cartOf(this.orders);
+    this.#setOrders(this.orders.commits.map(({ pushedAt, ...rest }) => rest));
+    return { removed, saved: removed.length ? this.#saveOrders() : this.#ordersPersisted() };
+  }
+  #setOrders(commits) { this.orders = { commits }; }
+  #ordersPersisted() { return Boolean(this.ordersPath) && !this.ordersError; }
+  #saveOrders() {
+    if (!this.ordersPath || this.ordersError) return false;
+    try { saveOrders(this.ordersPath, this.orders); return true; }
+    catch { throw new TuiError('订单记录没能写入本地文件，本次会话内仍然生效；请检查 ~/.config/mcd-tui 的权限。'); }
   }
 
   async quote(onProgress = () => {}) {

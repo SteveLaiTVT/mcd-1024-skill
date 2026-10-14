@@ -113,9 +113,14 @@ export function loadProfile(file) {
 }
 
 export function saveProfile(file, { allergies }) {
+  writePrivateJson(file, { schemaVersion: 1, allergies: [...allergies] });
+}
+
+// Atomic write of a local-only JSON file: directory 700, file 600.
+export function writePrivateJson(file, data) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify({ schemaVersion: 1, allergies: [...allergies] }, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, file);
   try { chmodSync(file, 0o600); } catch { /* best effort on filesystems without modes */ }
 }
