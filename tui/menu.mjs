@@ -3,6 +3,7 @@
 // quotes come from calculate-price; menu prices are labelled 菜单价 and never treated as a quote.
 import { quoteBest, menuItemCart } from '../web/meal-engine.mjs';
 import { money } from './ansi.mjs';
+import { MEAT_KINDS } from './intent.mjs';
 import { isDrink } from './render.mjs';
 
 export const MENU_FALLBACK_LIMIT = 6;
@@ -50,14 +51,13 @@ export async function liveMenuPlans(client, context, picks, request, coupons, ma
 }
 
 // '牛肉堡' → menu items that are beef burgers. Literal name match first, then the meat + kind of food asked for.
-const MEATS = [[/牛/, /牛(?!奶)|巨无霸|吉士|安格斯|1955|大堡口福|肉霸/], [/鸡/, /鸡/], [/鱼/, /鱼/], [/猪/, /猪/], [/虾/, /虾/]];
 export function matchMenu(items, item) {
   const named = items.filter((m) => m.name);
   if (!item) return named.filter((m) => m.priceFen != null && MEALISH.test(m.name) && !isDrink(m.name)).sort(byMenuPrice);
   const key = norm(item), literal = named.filter((m) => norm(m.name).includes(key));
   if (literal.length) return literal.sort(byMenuPrice);
   const core = key.replace(/(?:汉堡|堡|套餐|三件套)$/, ''), kind = key.slice(core.length);
-  const meat = MEATS.find(([k]) => k.test(core))?.[1];
+  const meat = MEAT_KINDS.find((k) => k.ask.test(core))?.name;
   const kindRe = /堡/.test(kind) ? /堡|巨无霸/ : /套餐|件套/.test(kind) ? /套餐|件套/ : null;
   if (!meat && !core) return kindRe ? named.filter((m) => kindRe.test(m.name)).sort(byMenuPrice) : [];
   return named.filter((m) => (meat ? meat.test(m.name) : m.name.includes(core)) && (!kindRe || kindRe.test(m.name))).sort(byMenuPrice);

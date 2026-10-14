@@ -2,8 +2,9 @@
 // only, live in private fields, and are never printed or written anywhere.
 // Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
 import { MCPClient, MCPError } from '../web/mcp-client.mjs';
-import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape } from '../web/meal-engine.mjs';
+import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape, detailOf } from '../web/meal-engine.mjs';
 import { fallbackPicks, liveMenuPlans, snapshotMenu, matchMenu, quoteMenuItems } from './menu.mjs';
+import { describeDetail, demoDetail, resolveInfoItem } from './info.mjs';
 import { readHistory, demoHistory, shiftDay } from '../web/order-history.mjs';
 import { storeResults } from '../web/store-search.mjs';
 import { DeepSeekClient, DeepSeekError } from '../web/deepseek-client.mjs';
@@ -295,6 +296,51 @@ export class TuiSession {
     onProgress({ text: `calculate-price（核价 ${Math.min(matches.length, 3)} 样，只读）…` });
     const { quoted, failed } = matches.length ? await quoteMenuItems(this.requireClient(), context, matches, this.benefits?.usable || []) : { quoted: [], failed: [] };
     return { item, items, matches, quoted, failed, sample: false };
+  }
+  // Read-only meal detail for an info question. Unlike menuItemCart, a query-meal-detail
+  // failure stays an error so the answer can say the interface failed rather than "this is a single".
+  // The name is the longest exact suffix on this store's menu, then matchMenu.
+  async itemDetail(item, onProgress = () => {}) {
+    const context = this.requireStore(), items = await this.storeMenu(onProgress);
+    const exact = resolveInfoItem(items, item), matches = exact ? [exact] : matchMenu(items, item);
+    const base = { item, items, matches, sample: this.demo };
+    if (!matches.length) return { ...base, detail: null, error: null };
+    if (this.demo) {
+      const raw = demoDetail(this.dataset.packages, matches[0].code, matches[0].name);
+      return { ...base, detail: raw ? describeDetail(raw) : null, error: null };
+    }
+    try {
+      onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
+      const data = (await this.requireClient().call('query-meal-detail', { ...context, code: matches[0].code })).data;
+      const raw = detailOf(data, matches[0].code);
+      if (!raw) return { ...base, detail: null, error: '餐品详情为空' };
+      return { ...base, detail: describeDetail(raw), error: null };
+    } catch (e) {
+      return { ...base, detail: null, error: e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回') };
+    }
+  }
+  // Read-only details for the picked meal. Uses lastReceipt.buy (store code + product codes),
+  // so a later store switch does not change which meal is described. Demo, or a pick with no
+  // buy context, returns no details — the receipt's part names still answer on their own.
+  async pickDetail(onProgress = () => {}) {
+    const receipt = this.lastReceipt, buy = receipt?.buy, sourceStore = buy?.storeCode || '';
+    if (this.demo || !buy) return { receipt, details: [], error: null, sourceStore };
+    const client = this.requireClient(), details = [];
+    let error = null;
+    for (const it of buy.items || []) {
+      const code = it?.productCode;
+      if (!code) continue;
+      try {
+        onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
+        const data = (await client.call('query-meal-detail', { storeCode: sourceStore, orderType: 1, beType: 1, code })).data;
+        const raw = detailOf(data, code);
+        if (raw) details.push(describeDetail(raw));
+        else error = error || '餐品详情为空';
+      } catch (e) {
+        error = e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回');
+      }
+    }
+    return { receipt, details, error, sourceStore };
   }
 
   couponPicture() {

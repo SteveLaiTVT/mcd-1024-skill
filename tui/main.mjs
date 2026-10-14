@@ -25,8 +25,8 @@ if (args.has('--help') || args.has('-h')) {
 }
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
-const [templates, plans, offers, campaigns, menu] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns', 'menu'].map(json));
-await runTui({ dataset: { templates, plans, offers, campaigns, menu }, demo: args.has('--demo'), color: args.has('--no-color') ? false : undefined,
+const [templates, plans, offers, campaigns, menu, packages] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns', 'menu', 'packages'].map(json));
+await runTui({ dataset: { templates, plans, offers, campaigns, menu, packages }, demo: args.has('--demo'), color: args.has('--no-color') ? false : undefined,
   profilePath: args.has('--no-profile') ? null : defaultProfilePath(), ordersPath: args.has('--no-profile') ? null : defaultOrdersPath() });
 // Keep-alive sockets from fetch can hold the event loop briefly; nothing else is pending.
 process.exit(0);
