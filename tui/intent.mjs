@@ -29,9 +29,35 @@ export function parseLocalIntent(text, mainNames = new Map()) {
   if (avoiding && /前两天|这两天|最近两天|前天/.test(t)) intent.avoidRecentDays = 2;
   else if (avoiding && /昨天|昨日/.test(t)) intent.avoidRecentDays = 1;
   const avoidCodes = [...mainNames].filter(([, name]) => new RegExp(`${NEGATION}[^，,。；;]*${escape(name)}`).test(t)).map(([code]) => code);
-  if (avoidCodes.length) intent.avoidMainCodes = avoidCodes;
+  // Generic meat words ('牛肉汉堡', '想吃鸡', '不要鱼') are not product names, so the
+  // literal match above misses them. Map each meat word to every main of that meat:
+  // '牛' excludes '牛奶' (milk). A negated meat ('不要牛肉') avoids all its mains.
+  // Product names are stripped first, so a meat word inside a specific product name
+  // ('不要麦辣鸡腿汉堡') does not avoid/want the whole meat class — the literal
+  // match already handles that one product.
+  const tNoNames = [...mainNames.values()].sort((a, b) => b.length - a.length).reduce((s, n) => s.split(n).join(' '), t);
+  const MEAT_PATTERNS = [
+    ['牛(?!奶)', /牛(?!奶)|巨无霸|吉士|安格斯|1955|大堡口福|肉霸/],
+    ['鸡', /鸡/],
+    ['鱼', /鱼/],
+    ['猪', /猪/],
+    ['虾', /虾/],
+  ];
+  for (const [meatSrc, nameRe] of MEAT_PATTERNS) {
+    if (!new RegExp(meatSrc).test(tNoNames)) continue;
+    const codes = [...mainNames].filter(([, name]) => nameRe.test(name)).map(([code]) => code);
+    if (!codes.length) continue;
+    if (new RegExp(`${NEGATION}[^，,。；;]*${meatSrc}`).test(tNoNames)) avoidCodes.push(...codes);
+  }
+  if (avoidCodes.length) intent.avoidMainCodes = [...new Set(avoidCodes)];
   // A main named without a negation in front is one the user wants (drives the à la carte vs set upgrade math).
+  // Generic meat words add all mains of that meat; avoided mains (literal or generic) never become wanted.
   const wantCodes = [...mainNames].filter(([code, name]) => !avoidCodes.includes(code) && t.includes(name)).map(([code]) => code);
+  for (const [meatSrc, nameRe] of MEAT_PATTERNS) {
+    if (!new RegExp(meatSrc).test(tNoNames)) continue;
+    if (new RegExp(`${NEGATION}[^，,。；;]*${meatSrc}`).test(tNoNames)) continue;
+    for (const [code, name] of mainNames) if (!avoidCodes.includes(code) && !wantCodes.includes(code) && nameRe.test(name)) wantCodes.push(code);
+  }
   if (wantCodes.length) intent.wantMainCodes = wantCodes;
   if (/省钱|便宜|最低价|划算|实惠/.test(t)) intent.goal = 'cheapest';
   else if (/新口味|换口味|尝鲜|没吃过|新鲜/.test(t)) intent.goal = 'variety';

@@ -86,11 +86,14 @@ export function applyUpgrades(report, mainNames = new Map()) {
       reason: set.priceFen <= single.priceFen ? `同主食套餐「${set.title}」不比单点贵，推荐套餐` : `你点名的主食：套餐只多 ${money(set.priceFen - single.priceFen)}，推荐套餐` }))];
   }
   // A named main narrows the pool to options containing it, when any are left.
+  // When none are left, do NOT silently substitute (e.g. chicken for a beef request):
+  // clear the pool and record the miss, so the flow returns an empty card that names
+  // the wanted main (emptyCause finds the cheapest wanted plan, even over budget).
   if (want.size) {
     const named = report.candidates.filter((p) => p.mainCodes?.some((c) => want.has(c)));
     const names = [...want].map((c) => mainNames.get(c) || c).join('、');
     if (named.length) { report.candidates = named; notes.push(`按你点名的「${names}」只在含它的选项里挑（单点与套餐都比）。`); }
-    else notes.push(`预算内没有含「${names}」的选项（可能超预算、被避开或因过敏排除），改为在全部候选里按价格挑。`);
+    else { report.candidates = []; report.wantMissed = { names, codes: [...want] }; notes.push(`没有含「${names}」的候选，不做替代推荐。`); }
   }
   report.pricingNotes = notes;
   return report;

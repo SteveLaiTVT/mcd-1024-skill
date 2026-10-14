@@ -27,10 +27,12 @@ export function cardData(r, { note = '' } = {}) {
     items: (r.parts || []).map((p) => ({ n: p.name, q: p.quantity })), ...(note ? { note } : {}), ...(r.sample ? { sp: 1 } : {}) };
 }
 
-// Percent-encode the five characters that would collide with the structural
-// separators or with percent-decoding itself. '%' goes first so the '%' in
-// '%7E' etc. is not re-encoded. Chinese text stays raw UTF-8 (no size blow-up).
-const escField = (s) => String(s ?? '').replace(/%/g, '%25').replace(/~/g, '%7E').replace(/,/g, '%2C').replace(/\*/g, '%2A').replace(/\\/g, '%5C');
+// Percent-encode the characters that would collide with the structural separators,
+// with percent-decoding itself, or with a URL: '%' first so the '%' in '%7E' etc. is
+// not re-encoded. Chinese text stays raw UTF-8 (no size blow-up) — but a literal
+// SPACE is invalid in a URL (some scanners/browsers truncate at it), so it becomes
+// %20. The card page decodeURIComponent()s each field, so %20 comes back as a space.
+const escField = (s) => String(s ?? '').replace(/%/g, '%25').replace(/~/g, '%7E').replace(/,/g, '%2C').replace(/\*/g, '%2A').replace(/\\/g, '%5C').replace(/ /g, '%20');
 // A field that fails to decode is used raw (a hand-made link), never dropped.
 const decField = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 

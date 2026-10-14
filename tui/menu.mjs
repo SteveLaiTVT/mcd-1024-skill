@@ -51,7 +51,7 @@ export async function liveMenuPlans(client, context, picks, request, coupons, ma
 }
 
 // '牛肉堡' → menu items that are beef burgers. Literal name match first, then the meat + kind of food asked for.
-const MEATS = [[/牛/, /牛(?!奶)|巨无霸|吉士|安格斯|1955/], [/鸡/, /鸡/], [/鱼/, /鱼/], [/猪/, /猪/], [/虾/, /虾/]];
+const MEATS = [[/牛/, /牛(?!奶)|巨无霸|吉士|安格斯|1955|大堡口福|肉霸/], [/鸡/, /鸡/], [/鱼/, /鱼/], [/猪/, /猪/], [/虾/, /虾/]];
 export function matchMenu(items, item) {
   const named = items.filter((m) => m.name);
   if (!item) return named.filter((m) => m.priceFen != null && MEALISH.test(m.name) && !isDrink(m.name)).sort(byMenuPrice);
@@ -76,9 +76,26 @@ export async function quoteMenuItems(client, context, matches, coupons, limit = 
   return { quoted: quoted.sort((a, b) => a.priceFen - b.priceFen), failed };
 }
 
-// Why a pick came back with no candidate. Only 'budget' may ever suggest raising the budget.
+// Why a pick came back with no candidate. Only 'budget' and 'want' (over budget for the
+// named main) may ever suggest raising the budget.
 export function emptyCause(report) {
   const quoted = report.quotedPlans || [], failed = report.failedPlans || [], people = report.request?.people || 1;
+  // The user named a main (applyUpgrades set wantMissed) and none is in the pool: say so,
+  // with the cheapest wanted plan even when it is over budget. Skip when allergy filtering
+  // removed things — then the filtered/menu logic below explains it better.
+  if (report.wantMissed && !(report.allergy?.excluded?.length)) {
+    const want = new Set(report.wantMissed.codes || []);
+    const wantedQuoted = quoted.filter((p) => p.mainCodes?.some((c) => want.has(c)));
+    if (wantedQuoted.length) {
+      const cheapest = [...wantedQuoted].sort((a, b) => a.priceFen - b.priceFen)[0];
+      // The cheapest wanted plan may be out of the pool for a non-budget reason: an
+      // à la carte single at 7 分饱 fits the budget but not the portion. Only say
+      // 'raise the budget' when the blocker really is the price.
+      const portionBlocked = cheapest.withinBudget && cheapest.fitsPortion === false;
+      return { cause: 'want', cheapest, names: report.wantMissed.names || '', overBudget: !portionBlocked && !cheapest.withinBudget, portionBlocked };
+    }
+    return { cause: 'want', cheapest: null, names: report.wantMissed.names || '' };
+  }
   const fits = quoted.filter((p) => p.fitsPortion !== false);
   if (fits.length && !fits.some((p) => p.withinBudget)) {
     const cheapest = [...fits].sort((a, b) => a.priceFen - b.priceFen)[0];
@@ -103,6 +120,19 @@ export function renderEmpty(report, P) {
     const c = why.cheapest, perPerson = why.perPersonFen;
     return { title: '预算不够', lines: [P.yellow(`预算内没有候选：最便宜的「${c.title}」要 ${money(c.priceFen)}${r.people > 1 ? `（人均约 ${money(perPerson)}）` : ''}，你的人均预算是 ${money(r.budgetPerPersonFen)}。`),
       `把人均预算提到 ${money(perPerson)} 就能选到它，例如说“人均 ${Math.ceil(perPerson / 100)}”。`, P.gray('/why 查看核价明细')] };
+  }
+  if (why.cause === 'want') {
+    const names = why.names || '你点的';
+    if (why.cheapest) {
+      const c = why.cheapest, perPerson = Math.ceil(c.priceFen / (r.people || 1));
+      if (why.portionBlocked) {
+        return { title: '你点的只有单点，不够分饱', lines: [P.yellow(`「${c.title}」${money(c.priceFen)}只有约 5 分饱，不够你说的 ${r.portion} 分饱；套餐里没有含「${names}」的。`),
+          `想吃的话，说“5分饱”就能单点它。`, ...showMenu, P.gray('/why 查看核价明细')] };
+      }
+      return { title: '预算内没有你点的', lines: [P.yellow(`预算内没有含「${names}」的选项。最便宜的含你点的是「${c.title}」${money(c.priceFen)}${r.people > 1 ? `（人均约 ${money(perPerson)}）` : ''}。`),
+        `把人均预算提到 ${money(perPerson)} 就能选它，例如说“人均 ${Math.ceil(perPerson / 100)}”。`, ...showMenu, P.gray('/why 查看核价明细')] };
+    }
+    return { title: '这家店没有你点的', lines: [P.yellow(`这家店没有含「${names}」的选项（菜单里没有，或都被排除了）。`), ...showMenu, P.gray('/why 查看核价明细')] };
   }
   if (why.cause === 'filtered') {
     return { title: '都被筛掉了', lines: [P.yellow('有报价，但都被你的条件排除了，不是预算问题。'),
