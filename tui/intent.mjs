@@ -49,6 +49,22 @@ export function parseLocalIntent(text, mainNames = new Map()) {
 // '有什么活动' and similar questions go to /activity instead of the meal flow.
 export const isActivityQuery = (text) => /有(?:什么|啥|哪些)(?:优惠)?活动|最近.{0,4}活动|活动日历|活动有哪些|什么活动可以/.test(String(text || ''));
 
+// Price questions ('牛肉堡多少钱', '我想吃牛肉堡，最低的预算要多少钱') get a direct menu lookup, not the pick flow.
+// → { item } (item is the food words asked about, or null for 'what is cheapest'), anything else → null.
+const PRICE_ASK = /多少钱|多少元|多少块|几块钱?|几元|什么价|啥价|价格是|价钱|预算(?:要|得|需要)?多少|要多少(?:钱|预算)|最低.{0,6}多少/;
+const PICK_ASK = /推荐|挑一|帮我选|选一|吃什么|吃啥|有什么|有啥|转盘/;
+const FOOD = /[一-鿿A-Za-z0-9]{0,10}(?:汉堡|堡|巨无霸|套餐|三件套|麦乐鸡|鸡块|鸡翅|翅|鸡排|薯条|薯饼|可乐|雪碧|派|卷|饭|咖啡|拿铁|奶昔|圆筒|新地|麦旋风|全家桶|桶|小食|饮料|早餐|甜品)/;
+const FILLER = /请问|帮我查一?下|查一?下|我想吃|我想要|我要吃|想吃|想要|我要|来一?[个份]|一[个份]|这家店?的?|你们|麦当劳的?/g;
+export function parsePriceQuery(text) {
+  const t = String(text || '').normalize('NFKC').trim();
+  if (!PRICE_ASK.test(t) || PICK_ASK.test(t)) return null;
+  for (const part of t.replace(FILLER, ' ').split(/[，,。.!！？?；;\s]+/)) {
+    const item = FOOD.exec(part.replace(PRICE_ASK, ' ').split(' ')[0] || '')?.[0].replace(/^(?:最低|最便宜|便宜|的)+/, '');
+    if (item) return { item };
+  }
+  return { item: null };
+}
+
 // Buy intent on the current pick: '就吃这个了' and close variants → { delivery, takeWay } ('堂食' / '外带' / null),
 // anything else → null. Whole-sentence matches only, so '这个好吃吗' or '不要这个' never buy.
 // Local rules only: the DeepSeek intent agent never sees or triggers a purchase.

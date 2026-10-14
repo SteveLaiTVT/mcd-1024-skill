@@ -14,9 +14,47 @@ import { renderIntent, renderReport, renderAgentResult, renderPick, renderRecent
 import { maybeReceipt } from './receipt.mjs';
 import { stripAllergyText } from './allergy.mjs';
 import { storeStatus } from '../web/store-search.mjs';
+import { renderEmpty, emptyCause, renderPriceAnswer } from './menu.mjs';
 
 const message = (e) => e instanceof TuiError || e instanceof MCPError || e instanceof DeepSeekError ? e.message : (e?.message || '未完成');
 const STEPS = 6;
+
+// First store the official search says is open; selects it on the session.
+async function selectOpenStore(session, target) {
+  const stores = await session.searchStores(target.city, target.keyword);
+  const open = stores.find((s) => s.businessStatus === true);
+  const where = target.isDefault ? `默认区域 ${target.label}` : `${target.city} · ${target.keyword}`;
+  if (!open) throw new TuiError(stores.length ? `${where}找到 ${stores.length} 家门店，但官方未确认营业中。可用 /store ${target.city} ${target.keyword} 查看后手动选择。` : `${where}没有找到门店，在指令里加 @城市 关键词，或用 /store 换个位置。`);
+  session.selectStore(open, target.city);
+  return { open, stores };
+}
+
+// '牛肉堡多少钱' / '最低预算要多少钱': a direct lookup in the store's menu plus calculate-price — not the pick flow,
+// which answers a different question and would report '预算内没有候选'. Read-only: query-meals, query-meal-detail, calculate-price.
+export async function runPriceFlow(session, text, query, ui) {
+  const P = ui.palette, ask = query.item || '最便宜的餐', task = ui.begin(`查价：${ask}`);
+  try {
+    if (!session.demo) {
+      if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
+      const local = parseLocalIntent(text, session.mainNames);
+      const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
+      if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
+    }
+    const result = await session.priceLookup(query.item, (p) => task.progress(p.text));
+    task.done();
+    session.lastDetails = { query: text, lines: [
+      `查价「${ask}」· ${session.store?.storeName || ''}`,
+      `门店菜单 ${result.items.length} 项${session.menu?.shape ? `（${session.menu.shape}）` : ''}，匹配 ${result.matches.length} 项：${result.matches.slice(0, 8).map((m) => m.name).join('、') || '无'}`,
+      ...result.quoted.map((q) => `calculate-price · ${q.name} → ${q.priceFen / 100} 元${q.couponNames.length ? `（用券 ${q.couponNames.join('、')}）` : ''}`),
+      ...result.failed.map((f) => P.yellow(`calculate-price · ${f.name} 没成功：${f.reason}`))] };
+    ui.result(result.matches.length ? `${ask}多少钱` : `没找到${ask}`, renderPriceAnswer(result, P, { storeName: session.store?.storeName }), result.matches.length ? undefined : 'yellow');
+    return { status: 'priced', result };
+  } catch (e) {
+    task.done();
+    ui.result('没查到价格', [`${message(e)}`, P.gray('/store 换一家店，或稍后再问。')], 'yellow');
+    return { status: 'failed', error: message(e) };
+  }
+}
 
 export async function runAgentFlow(session, text, ui, { signal } = {}) {
   const P = ui.palette, details = [], notes = [];
@@ -63,11 +101,7 @@ export async function runAgentFlow(session, text, ui, { signal } = {}) {
       if (!target) log(`沿用 ${session.store.storeName}`);
       else {
         task.progress(`${current} · ${target.city} ${target.keyword}`);
-        const stores = await session.searchStores(target.city, target.keyword);
-        const open = stores.find((s) => s.businessStatus === true);
-        const where = target.isDefault ? `默认区域 ${target.label}` : `${target.city} · ${target.keyword}`;
-        if (!open) throw new TuiError(stores.length ? `${where}找到 ${stores.length} 家门店，但官方未确认营业中。可用 /store ${target.city} ${target.keyword} 查看后手动选择。` : `${where}没有找到门店，在指令里加 @城市 关键词，或用 /store 换个位置。`);
-        session.selectStore(open, target.city);
+        const { open, stores } = await selectOpenStore(session, target);
         if (target.isDefault) notes.push(`没给位置，按默认区域 ${target.label} 选店`);
         log(`${open.storeName} · ${storeStatus(open)}`, [
           ...(target.isDefault ? [P.yellow(`指令未给位置，默认搜索 ${target.label} 附近；指令里写 @城市 关键词 或 /store 可覆盖。`)] : []),
@@ -117,11 +151,13 @@ export async function runAgentFlow(session, text, ui, { signal } = {}) {
       [...renderReport(report, P, { remaining: session.remainingSeconds() }), ...renderCoupons(session.couponPicture(), P, { demo: session.demo })]);
     check();
     if (report.allergy?.excluded.length) notes.push(`过敏筛选排除了 ${report.allergy.excluded.length} 份`);
+    if (report.menuFallback?.quoted) notes.push('模板套餐这家店用不了，按门店实际菜单挑的');
     if (!report.candidates.length) {
       task.done();
-      ui.result('没有找到合适的', [P.yellow('预算内没有候选。'), `可以提高人均预算、调整食量或减少避开项后再试。${report.allergy?.excluded.length ? `过敏筛选排除了 ${report.allergy.excluded.length} 份，不会为了凑数放宽。` : ''}`,
-        P.gray('/why 查看核价明细')], 'yellow');
-      return finish({ status: 'empty', report });
+      // The card names the real cause: only a budget shortfall ever suggests raising the budget.
+      const empty = renderEmpty(report, P);
+      ui.result(empty.title, empty.lines, 'yellow');
+      return finish({ status: 'empty', cause: emptyCause(report).cause, report });
     }
 
     // 6. Final pick: the wheel, or the recommend + optimise agents deciding internally.

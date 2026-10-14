@@ -167,6 +167,13 @@ export function renderReport(report, P, { remaining = null } = {}) {
     lines.push(`${mark} ${padEnd(p.title, 26)} ${padEnd(p.wheelKind || '', 12)} ${P.bold(money(p.priceFen))}${saving}${coupons}${note}`);
   }
   for (const p of [...report.excludedPlans, ...report.failedPlans].filter((p) => !/过敏原|成分不明/.test(p.reason)).slice(0, 6)) lines.push(P.gray(`- ${p.title}：${p.reason}`));
+  // What the store's menu interface actually returned, and what each template code did with it.
+  if (report.menu) lines.push(P.gray(`门店菜单（query-meals）：${report.menu.ok ? `识别 ${report.menu.items.length} 项` : P.yellow(report.menu.error)} · ${report.menu.shape}`));
+  const HOW = { menu: '菜单里有', name: '菜单里按名称对应到', absent: '菜单里没有' }, DETAIL = { ok: '已取到', empty: '为空' };
+  for (const t of (report.templateCodes || []).filter((t) => t.detail !== 'ok' || t.how !== 'menu').slice(0, 6)) {
+    lines.push(P.gray(`  模板 ${t.code}${t.name ? `（${t.name}）` : ''}：${HOW[t.how]}${t.how === 'name' ? ` ${t.storeCode}` : ''} · 详情 ${DETAIL[t.detail] || `出错：${t.error}`}`));
+  }
+  if (report.menuFallback) lines.push(P.cyan(`模板套餐这家店用不了，按门店实际菜单补充核价 ${report.menuFallback.tried} 样，成功 ${report.menuFallback.quoted} 样（份量未按几分饱校验）。`));
   for (const p of report.quotedPlans.filter((p) => p.upgrade && p.kind !== 'alacarte' && pool.has(p.id)).slice(0, 3)) lines.push(P.cyan(`升级算账：${upgradeText(p.upgrade)}`));
   for (const note of report.pricingNotes || []) lines.push(P.cyan(note));
   lines.push(...renderAllergyScreen(report.allergy, P));

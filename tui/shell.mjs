@@ -7,10 +7,10 @@ import { DeepSeekError } from '../web/deepseek-client.mjs';
 import { budgetFen } from '../web/meal-engine.mjs';
 import { padEnd, money } from './ansi.mjs';
 import { TuiError } from './session.mjs';
-import { runAgentFlow } from './agent-flow.mjs';
+import { runAgentFlow, runPriceFlow } from './agent-flow.mjs';
 import { NOTICE, statusLine, renderStores, renderBenefits, renderReport, renderAgentResult, renderAnswer, renderHeatmap, helpLines, renderClaimable, renderAllergies,
   renderActivities, HELP_COMMANDS } from './render.mjs';
-import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery, parseBuyIntent } from './intent.mjs';
+import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery, parseBuyIntent, parsePriceQuery } from './intent.mjs';
 import { parseAllergyStatement } from './allergy.mjs';
 import { printReceipt, maybeReceipt } from './receipt.mjs';
 import { parseCommitNote, renderGraph, renderCart, commitLine, headOf, cartOf, unpushed, CART_USAGE } from './orders.mjs';
@@ -345,6 +345,9 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
       ui.info(`过敏信息已在本地记录，只把其余内容交给 Agent：${rest}`);
     }
     if (isActivityQuery(rest)) return commands.activity();
+    // '牛肉堡多少钱': a direct price lookup in the store's menu, not the pick flow.
+    const priceQuery = parsePriceQuery(rest);
+    if (priceQuery) return runPriceFlow(session, rest, priceQuery, ui);
     controller = new AbortController();
     try { await runAgentFlow(session, rest, ui, { signal: controller.signal }); }
     finally { controller = null; }

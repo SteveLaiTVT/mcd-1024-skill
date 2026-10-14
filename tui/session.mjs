@@ -2,7 +2,8 @@
 // only, live in private fields, and are never printed or written anywhere.
 // Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
 import { MCPClient, MCPError } from '../web/mcp-client.mjs';
-import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest } from '../web/meal-engine.mjs';
+import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape } from '../web/meal-engine.mjs';
+import { fallbackPicks, liveMenuPlans, snapshotMenu, matchMenu, quoteMenuItems } from './menu.mjs';
 import { readHistory, demoHistory, shiftDay } from '../web/order-history.mjs';
 import { storeResults } from '../web/store-search.mjs';
 import { DeepSeekClient, DeepSeekError } from '../web/deepseek-client.mjs';
@@ -56,6 +57,9 @@ export class TuiSession {
       catch (e) { this.deepseekNote = e instanceof DeepSeekError ? e.message : 'DeepSeek key 格式未通过校验。'; }
     }
     this.mainNames = new Map(dataset.plans.plans.flatMap((p) => p.parts.filter((part) => dataset.templates.mainProductCodes.includes(part.code)).map((part) => [part.code, part.name])));
+    // Template package code → name (sample menu + sample plans): lets a store that lists the same package under its own code still price it.
+    this.packageNames = new Map([...(dataset.menu?.items || []).map((i) => [i.productCode, i.name]), ...dataset.plans.plans.flatMap((p) => (p.packages || []).map((k) => [k.productCode, k.name]))]);
+    this.menu = null; // { storeCode, items, shape }: the last query-meals result for the selected store.
     if (demo) this.store = { ...dataset.templates.sampleStore, businessStatus: null, sample: true };
   }
 
@@ -92,7 +96,7 @@ export class TuiSession {
     if (!city || !keyword) throw new TuiError('用法：/store 城市 位置关键词，例如 /store 深圳 华强北');
     return storeResults((await this.requireClient().call('query-nearby-stores', { beType: 1, searchType: 2, city, keyword })).data);
   }
-  selectStore(store, city) { this.store = { ...store, city }; this.benefits = null; this.weather = { status: 'unavailable' }; this.invalidate(); }
+  selectStore(store, city) { this.store = { ...store, city }; this.benefits = null; this.menu = null; this.weather = { status: 'unavailable' }; this.invalidate(); }
 
   setRequest(change) { this.request = { ...this.request, ...change }; this.invalidate(); }
   setProfile(change) {
@@ -248,18 +252,51 @@ export class TuiSession {
     const capture = (p) => { if (p?.benefits) this.benefits = p.benefits; onProgress(p); };
     const report = this.demo
       ? prepareDemo({ plans: this.dataset.plans, offers: this.dataset.offers, campaigns: this.dataset.campaigns }, { ...context, storeName: this.store.storeName }, request)
-      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture);
+      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames });
+    if (report.menu?.ok) this.menu = { storeCode: context.storeCode, items: report.menu.items, shape: report.menu.shape };
+    const setsQuoted = report.quotedPlans.length;
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
     const mains = alaCarteMains(this.mainNames, request);
     const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
       : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress) : {};
     mergeAlaCarte(report, singles);
+    // No template priced at this store (not a budget problem): price what the store's own menu offers instead.
+    if (!this.demo && !setsQuoted && !report.candidates.length && report.menu?.ok) {
+      const picks = fallbackPicks(report.menu.items, request);
+      if (picks.length) {
+        const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress);
+        mergeAlaCarte(report, extra);
+        report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
+        report.menuFallback = { tried: picks.length, quoted: extra.plans.length };
+      }
+    }
     applyAllergyFilter(report, this.#allergies);
     applyUpgrades(report, this.mainNames);
     report.counts = { ...report.counts, quotedPlans: report.quotedPlans.length, wheelCandidates: report.candidates.length };
+    if (report.candidates.length && ['empty', 'unavailable'].includes(report.status)) report.status = 'ready';
     if (report.status === 'ready' && !report.candidates.length) report.status = 'empty';
     this.wheel.accept(report); return report;
   }
+  // The selected store's menu (query-meals, read-only), reused until the store changes.
+  async storeMenu(onProgress = () => {}) {
+    const context = this.requireStore();
+    if (this.demo) return snapshotMenu(this.dataset.menu);
+    if (this.menu?.storeCode === context.storeCode) return this.menu.items;
+    onProgress({ text: 'query-meals（门店菜单，只读）…' });
+    const raw = (await this.requireClient().call('query-meals', context)).data, items = [...menuIndex(raw).values()];
+    if (!items.length) throw new TuiError(`这家店的菜单接口（query-meals）没有返回可识别的餐品（${menuShape(raw)}），不是预算问题。`);
+    this.menu = { storeCode: context.storeCode, items, shape: menuShape(raw) };
+    return items;
+  }
+  // '牛肉堡多少钱': menu matches, and live calculate-price on the cheapest few (quantity 1). Never orders, never claims.
+  async priceLookup(item, onProgress = () => {}) {
+    const context = this.requireStore(), items = await this.storeMenu(onProgress), matches = matchMenu(items, item);
+    if (this.demo) return { item, items, matches, quoted: [], failed: [], sample: true };
+    onProgress({ text: `calculate-price（核价 ${Math.min(matches.length, 3)} 样，只读）…` });
+    const { quoted, failed } = matches.length ? await quoteMenuItems(this.requireClient(), context, matches, this.benefits?.usable || []) : { quoted: [], failed: [] };
+    return { item, items, matches, quoted, failed, sample: false };
+  }
+
   couponPicture() {
     const claimable = this.demo ? claimableList(this.dataset.offers?.offers, this.dataset.campaigns?.events) : claimableList(this.benefits?.offers, this.benefits?.entries);
     return { ...couponPicture(this.demo ? null : this.benefits, this.wheel.report), claimable };
