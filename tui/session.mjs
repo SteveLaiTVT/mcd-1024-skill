@@ -324,6 +324,7 @@ export class TuiSession {
   // Read-only details for the picked meal. Uses lastReceipt.buy (store code + product codes),
   // so a later store switch does not change which meal is described. Demo, or a pick with no
   // buy context, returns no details — the receipt's part names still answer on their own.
+  // productCode is the priced package (selected choices live in roundList); 〔默认〕 is the catalog isDefault and can differ from receipt.parts.
   async pickDetail(onProgress = () => {}) {
     const receipt = this.lastReceipt, buy = receipt?.buy, sourceStore = buy?.storeCode || '';
     if (this.demo || !buy) return { receipt, details: [], error: null, sourceStore };

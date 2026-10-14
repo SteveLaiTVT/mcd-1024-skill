@@ -119,17 +119,25 @@ export function answerParts({ name = '', parts = [], detail = null, detailError 
 
 function extraRows(detail) {
   if (!detail) return [];
-  const rows = [];
+  const grouped = new Map();
+  const add = (where, names) => {
+    for (const raw of names) {
+      const name = String(raw);
+      if (!name) continue;
+      const list = grouped.get(where) || [];
+      if (!list.includes(name)) list.push(name);
+      grouped.set(where, list);
+    }
+  };
   const loose = [];
   for (const extra of detail.extras || []) {
     // Merged picks annotate each removable name with the item it came from.
-    if (extra && typeof extra === 'object' && Array.isArray(extra.names)) {
-      if (extra.names.length) rows.push({ where: extra.where ?? detail.name, names: extra.names });
-    } else if (extra) loose.push(String(extra));
+    if (extra && typeof extra === 'object' && Array.isArray(extra.names)) add(extra.where ?? detail.name, extra.names);
+    else if (extra) loose.push(String(extra));
   }
-  if (loose.length) rows.push({ where: detail.name, names: loose });
-  for (const c of selectedChoices(detail)) if (c.extras?.length) rows.push({ where: c.name, names: c.extras });
-  return rows;
+  if (loose.length) add(detail.name, loose);
+  for (const c of selectedChoices(detail)) if (c.extras?.length) add(c.name, c.extras);
+  return [...grouped.entries()].map(([where, names]) => ({ where, names }));
 }
 
 export function answerIngredients({ name = '', detail = null, parts = [], names = [], sample = false, plainLead = false, detailError = null }) {
@@ -143,12 +151,19 @@ function meatClause(names, { colon = false } = {}) {
   return colon ? `按产品名判定：${labels.join('、')}` : `按产品名判定含${labels.join('、')}`;
 }
 
-// Map one allergy record onto a MEAT_KINDS label. 牛奶 misses /牛(?!奶)/. 蛋 records stay out
-// (鸡蛋 must not count as 鸡肉). The warning quotes the original record, not the label.
+// Map one allergy record onto a MEAT_KINDS label. Split on 、，, so '鸡蛋、鸡肉' still
+// reports 鸡肉. A piece that contains 蛋 is skipped (鸡蛋 must not count as 鸡肉).
+// 牛奶 misses /牛(?!奶)/. The warning quotes the original record, not the label.
 function allergyLabel(record) {
   const text = String(record ?? '');
-  if (!text || text.includes('蛋')) return '';
-  return MEAT_KINDS.find((k) => k.ask.test(text))?.label || '';
+  if (!text) return '';
+  for (const item of text.split(/[、，,]/)) {
+    const piece = item.trim();
+    if (!piece || piece.includes('蛋')) continue;
+    const hit = MEAT_KINDS.find((k) => k.ask.test(piece));
+    if (hit) return hit.label;
+  }
+  return '';
 }
 
 function allergyLine(meat, allergies, P) {
@@ -209,9 +224,13 @@ function renderIngredients(answer, P) {
   const composed = comp.length ? comp : fromDetail;
   if (answer.extras.length) {
     const bits = answer.extras.map((r) => `${r.where} · 默认可去掉的料：${r.names.join('、')}（来自特调选项）`);
-    lines.push(`接口没有给完整配料表，下面不是完整配料表。能确定的：${bits.join('；')} · ${meatClause(answer.names, { colon: true })}。`);
+    lines.push('接口没有给完整配料表，下面不是完整配料表。');
+    lines.push(bits.join('；'));
+    lines.push(`${meatClause(answer.names, { colon: true })}。`);
   } else {
-    lines.push(`接口没给单品配料明细。能确定的：${meatClause(answer.names)}${composed.length ? `；所在套餐组成：${composed.join('、')}` : ''}。`);
+    lines.push('接口没给单品配料明细。');
+    if (composed.length) lines.push(`所在套餐组成：${composed.join('、')}`);
+    lines.push(`${meatClause(answer.names)}。`);
   }
   if (answer.detailError) lines.push(`接口出错：餐品详情接口（query-meal-detail）这次出错：${answer.detailError}，不是菜单里没有。`);
   return lines;

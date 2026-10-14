@@ -283,6 +283,9 @@ test('有什么好吃的 is a pick, not a parts question', async () => {
 test('里 inside an ordinary statement is not a composition question', () => {
   const names = namesOf(['随心配', '双层吉士汉堡']);
   for (const t of ['家里有小孩，清淡点', '我都有点饿了', '公司里加班']) assert.equal(parseInfoQuery(t, names), null, t);
+  assert.equal(parseInfoQuery('我们都有什么优惠', names), null);
+  assert.equal(parseInfoQuery('你们有什么东西', names), null);
+  assert.equal(parseInfoQuery('牛肉汉堡里有什么', names).kind, 'parts');
 });
 
 test('这个/那个 plus a food kind refers to the current pick', () => {
@@ -319,6 +322,8 @@ test('allergy warnings follow meat labels and quote the original record', () => 
   assert.doesNotMatch(card(['牛奶'], '牛肉'), /过敏/);
   assert.doesNotMatch(card(['鸡蛋'], '鸡肉'), /过敏/);
   assert.match(card(['牛肉'], '牛肉'), /你记录了对牛肉过敏/);
+  const mixed = renderInfoAnswer(answerMeat({ names: ['麦辣鸡腿汉堡'], meat: '鸡肉', confirm: 'has' }), P, { allergies: ['鸡蛋、鸡肉'] }).join('\n');
+  assert.match(mixed, /过敏/);
 });
 
 test('confirm not answers 对 or 不对, and 羊肉 is unknown', () => {
@@ -362,4 +367,9 @@ test('pick with two single items calls pickDetail: plain false, receipt title, e
     { where: '麦辣鸡腿汉堡', names: ['麦香鸡酱'] },
     { where: '双层吉士汉堡', names: ['酸黄瓜'] },
   ]);
+  const merged = answerIngredients({ detail: { name: '双拼', extras: [
+    { where: '麦辣鸡腿汉堡', names: ['麦香鸡酱'] },
+    { where: '麦辣鸡腿汉堡', names: ['切块生菜', '麦香鸡酱'] },
+  ] } });
+  assert.deepEqual(merged.extras, [{ where: '麦辣鸡腿汉堡', names: ['麦香鸡酱', '切块生菜'] }]);
 });

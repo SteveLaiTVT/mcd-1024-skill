@@ -106,7 +106,7 @@ export async function runInfoFlow(session, text, query, ui) {
         return { status: 'answered', answer };
       }
       const answer = answerIngredients({ name: receipt.title, detail, parts: receipt.parts, names: partNames, sample: session.demo && !detail, detailError });
-      show('配料', answer);
+      show(receipt.title ? `${receipt.title}的配料` : '配料', answer);
       return { status: 'answered', answer };
     }
 
@@ -142,7 +142,7 @@ export async function runInfoFlow(session, text, query, ui) {
       return { status: 'answered', answer };
     }
     const answer = answerIngredients({ name: detail?.name || hitName, detail, names });
-    show('配料', answer);
+    show(`${detail?.name || hitName}的配料`, answer);
     return { status: 'answered', answer };
   } catch (e) {
     ui.result('没查到', [message(e)], 'yellow');

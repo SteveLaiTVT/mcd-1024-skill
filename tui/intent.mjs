@@ -214,12 +214,11 @@ export function parseInfoQuery(text, names) {
     // '有什么东西' keeps the question inside the hint, so its rest may be empty. Anything else
     // ('家里有小孩' / '我都有点饿了') is not a composition question.
     if (!QUESTION_SIGNAL.test(rest) && !/什么|啥|哪些/.test(hint)) return null;
-    // A bare 里 only points at this meal or a real product. '公司里加班' is not one.
-    if (hint === '里') {
-      const lead = cleanLead(subject);
-      const core = lead.replace(/(?:里面|里头|里)$/g, '');
-      if (!DEICTIC.test(lead) && !DEICTIC.test(core) && !isConcreteProduct(core, products)) return null;
-    }
+    // Every hint needs a subject that is this meal, a real product, or a food kind.
+    // An empty lead ('里面有什么') stays a composition question. '我们都有什么优惠' does not.
+    const lead = cleanLead(subject);
+    const core = lead.replace(/(?:里面|里头|里)$/g, '');
+    if (lead && !DEICTIC.test(lead) && !DEICTIC.test(core) && !isConcreteProduct(core, products) && !FOOD_KINDS.some((k) => core.endsWith(k))) return null;
     const target = targetOf(subject, products, { hintDeictic: hint === '里面' || hint === '里头' || hint === '里' });
     if (target) return { kind: 'parts', target };
     return null;
