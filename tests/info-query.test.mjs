@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { parseInfoQuery, meatsInName, parsePriceQuery, parseBuyIntent } from '../tui/intent.mjs';
-import { describeDetail, demoDetail, answerIngredients, renderInfoAnswer } from '../tui/info.mjs';
+import { describeDetail, demoDetail, answerIngredients, answerMeat, renderInfoAnswer } from '../tui/info.mjs';
+import { runInfoFlow } from '../tui/agent-flow.mjs';
 import { TuiSession } from '../tui/session.mjs';
 import { createUI } from '../tui/ui.mjs';
 import { createShell } from '../tui/shell.mjs';
@@ -277,4 +278,88 @@ test('有什么好吃的 is a pick, not a parts question', async () => {
   const text = await ask(session, '有什么好吃的');
   assert.match(text, /这一餐就吃/);
   assert.ok(session.lastReceipt);
+});
+
+test('里 inside an ordinary statement is not a composition question', () => {
+  const names = namesOf(['随心配', '双层吉士汉堡']);
+  for (const t of ['家里有小孩，清淡点', '我都有点饿了', '公司里加班']) assert.equal(parseInfoQuery(t, names), null, t);
+});
+
+test('这个/那个 plus a food kind refers to the current pick', () => {
+  const names = namesOf(['随心配']);
+  const beef = parseInfoQuery('这是牛肉吗', names);
+  assert.equal(beef.kind, 'meat');
+  assert.equal(beef.meat, '牛肉');
+  assert.deepEqual(beef.target, { ref: 'pick', implicit: false });
+  const burger = parseInfoQuery('这个汉堡有牛肉吗', names);
+  assert.equal(burger.kind, 'meat');
+  assert.equal(burger.meat, '牛肉');
+  assert.deepEqual(burger.target, { ref: 'pick', implicit: false });
+  const parts = parseInfoQuery('那个套餐里有什么', names);
+  assert.equal(parts.kind, 'parts');
+  assert.deepEqual(parts.target, { ref: 'pick', implicit: false });
+});
+
+test('不是 and 不带 are a negative meat question', () => {
+  const names = namesOf();
+  const notBeef = parseInfoQuery('这个不是牛肉吧', names);
+  assert.equal(notBeef.kind, 'meat');
+  assert.equal(notBeef.meat, '牛肉');
+  assert.equal(notBeef.confirm, 'not');
+  assert.deepEqual(notBeef.target, { ref: 'pick', implicit: false });
+  const notPork = parseInfoQuery('这不带猪肉吧', names);
+  assert.equal(notPork.kind, 'meat');
+  assert.equal(notPork.meat, '猪肉');
+  assert.equal(notPork.confirm, 'not');
+  assert.equal(notPork.target.ref, 'pick');
+});
+
+test('allergy warnings follow meat labels and quote the original record', () => {
+  const card = (allergies, meat) => renderInfoAnswer(answerMeat({ names: ['巨无霸'], meat, confirm: 'has' }), P, { allergies }).join('\n');
+  assert.doesNotMatch(card(['牛奶'], '牛肉'), /过敏/);
+  assert.doesNotMatch(card(['鸡蛋'], '鸡肉'), /过敏/);
+  assert.match(card(['牛肉'], '牛肉'), /你记录了对牛肉过敏/);
+});
+
+test('confirm not answers 对 or 不对, and 羊肉 is unknown', () => {
+  const denied = renderInfoAnswer(answerMeat({ names: ['巨无霸'], meat: '牛肉', confirm: 'not' }), P).join('\n');
+  assert.match(denied, /不对，含牛肉/);
+  const accepted = renderInfoAnswer(answerMeat({ names: ['麦辣鸡腿汉堡'], meat: '牛肉', confirm: 'not' }), P).join('\n');
+  assert.match(accepted, /对，按产品名没看到牛肉/);
+  const asked = parseInfoQuery('这个有羊肉吗', []);
+  assert.equal(asked.meat, '羊');
+  const lamb = answerMeat({ names: ['板烧鸡腿堡'], meat: asked.meat });
+  assert.equal(lamb.unknown, true);
+  const lambCard = renderInfoAnswer(lamb, P).join('\n');
+  assert.match(lambCard, /只能按名称识别牛\/鸡\/鱼\/猪\/虾/);
+  assert.match(lambCard, /没看到"羊"/);
+});
+
+test('pick with two single items calls pickDetail: plain false, receipt title, extras keep where', async () => {
+  const detail = (args) => ({
+    A1: { code: 'A1', name: '麦辣鸡腿汉堡', rounds: [], modification: { items: [{ minValues: 0, maxValues: 2, values: [{ name: '麦香鸡酱', selectedQuantity: 1, unselectedKey: 'off' }] }] } },
+    B1: { code: 'B1', name: '双层吉士汉堡', rounds: [], modification: { items: [{ minValues: 0, maxValues: 2, values: [{ name: '酸黄瓜', selectedQuantity: 1, unselectedKey: 'off' }] }] } },
+  }[args.code] || { code: args.code, name: '餐品', rounds: [] });
+  const mcp = fakeMcp({ detail });
+  const session = sessionOf({ mcp, env: { MCD_TOKEN: env.MCD_TOKEN } });
+  await session.connect();
+  session.selectStore({ storeCode: 'S1', storeName: '测试餐厅' }, '深圳');
+  const receipt = { title: '双拼小食', storeName: '测试餐厅', parts: [{ name: '麦辣鸡腿汉堡', quantity: 1 }, { name: '双层吉士汉堡', quantity: 1 }],
+    buy: { storeCode: 'S1', items: [{ productCode: 'A1', quantity: 1 }, { productCode: 'B1', quantity: 1 }] } };
+  session.lastReceipt = receipt;
+  const out = sink();
+  const ui = createUI({ output: out, palette: P, redact: (t) => session.redact(t) });
+  const names = [...session.mainNames.values(), ...session.packageNames.values()];
+  const before = mcp.calls.length;
+  const parts = await runInfoFlow(session, '这个套餐里有什么', parseInfoQuery('这个套餐里有什么', names), ui);
+  assert.deepEqual(mcp.calls.slice(before).map((c) => [c.name, c.args.code]), [['query-meal-detail', 'A1'], ['query-meal-detail', 'B1']]);
+  assert.equal(parts.status, 'answered');
+  assert.equal(parts.answer.plain, false);
+  assert.equal(parts.answer.name, receipt.title);
+  assert.doesNotMatch(out.text(), /这是单品，不是套餐/);
+  const ing = await runInfoFlow(session, '这个有什么料', parseInfoQuery('这个有什么料', names), ui);
+  assert.deepEqual(ing.answer.extras.map((r) => ({ where: r.where, names: r.names })), [
+    { where: '麦辣鸡腿汉堡', names: ['麦香鸡酱'] },
+    { where: '双层吉士汉堡', names: ['酸黄瓜'] },
+  ]);
 });

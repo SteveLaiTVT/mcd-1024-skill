@@ -23,6 +23,8 @@ import { buyContext, validBuyContext, baseItems, chooseTakeWay, createOrderArgs,
 
 export class TuiError extends Error {}
 
+const errText = (e) => e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回');
+
 export class TuiSession {
   #mcdToken; #deepseekKey; #mcp = null; #deepseek = null; #allergies = [];
   // profilePath: local JSON for allergy memory; null keeps it in memory only (tests, or no home directory).
@@ -316,7 +318,7 @@ export class TuiSession {
       if (!raw) return { ...base, detail: null, error: '餐品详情为空' };
       return { ...base, detail: describeDetail(raw), error: null };
     } catch (e) {
-      return { ...base, detail: null, error: e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回') };
+      return { ...base, detail: null, error: errText(e) };
     }
   }
   // Read-only details for the picked meal. Uses lastReceipt.buy (store code + product codes),
@@ -337,7 +339,7 @@ export class TuiSession {
         if (raw) details.push(describeDetail(raw));
         else error = error || '餐品详情为空';
       } catch (e) {
-        error = e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回');
+        error = error || errText(e);
       }
     }
     return { receipt, details, error, sourceStore };

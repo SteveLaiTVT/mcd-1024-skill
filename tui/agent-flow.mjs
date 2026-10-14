@@ -30,17 +30,21 @@ async function selectOpenStore(session, target) {
   return { open, stores };
 }
 
+// Connect if needed, then search the default area when the sentence names no store and none is selected.
+async function ensureStore(session, task, text) {
+  if (session.demo) return;
+  if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
+  const local = parseLocalIntent(text, session.mainNames);
+  const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
+  if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
+}
+
 // '牛肉堡多少钱' / '最低预算要多少钱': a direct lookup in the store's menu plus calculate-price — not the pick flow,
 // which answers a different question and would report '预算内没有候选'. Read-only: query-meals, query-meal-detail, calculate-price.
 export async function runPriceFlow(session, text, query, ui) {
   const P = ui.palette, ask = query.item || '最便宜的餐', task = ui.begin(`查价：${ask}`);
   try {
-    if (!session.demo) {
-      if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
-      const local = parseLocalIntent(text, session.mainNames);
-      const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
-      if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
-    }
+    await ensureStore(session, task, text);
     const result = await session.priceLookup(query.item, (p) => task.progress(p.text));
     task.done();
     session.lastDetails = { query: text, lines: [
@@ -62,7 +66,8 @@ const mergeInfoDetails = (details) => {
   if (!details?.length) return null;
   if (details.length === 1) return details[0];
   return { code: details.map((d) => d.code).join('+'), name: details.map((d) => d.name).filter(Boolean).join('、'),
-    plain: details.every((d) => d.plain), rounds: details.flatMap((d) => d.rounds || []), extras: details.flatMap((d) => d.extras || []) };
+    plain: false, rounds: details.flatMap((d) => d.rounds || []),
+    extras: details.flatMap((d) => (d.extras || []).map((n) => ({ where: d.name, names: [n] }))) };
 };
 const meatNamesOf = (detail, fallback) => [...new Set([fallback, detail?.name, ...compositionNames(detail)].filter(Boolean))];
 
@@ -105,12 +110,7 @@ export async function runInfoFlow(session, text, query, ui) {
       return { status: 'answered', answer };
     }
 
-    if (!session.demo) {
-      if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
-      const local = parseLocalIntent(text, session.mainNames);
-      const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
-      if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
-    }
+    await ensureStore(session, task, text);
     const looked = await session.itemDetail(query.target.item, (p) => task.progress(p.text));
     if (!looked.matches.length) {
       const answer = { kind: 'missing', item: query.target.item, items: looked.items };

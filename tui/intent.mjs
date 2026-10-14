@@ -128,12 +128,15 @@ export function parsePriceQuery(text, mainNames = new Map()) {
 const INFO_PICK = /推荐|好吃|吃什么|吃啥|想吃|来一?[份个]|帮我选|预算|转盘/;
 const SUBJECT_REJECT = /我要|想|来|推荐|吃/;
 const A_NOT_A = new Set(['有没有', '含不含', '带不带', '是不是']);
-const MEAT_ASK = /^(?<subject>.*?)(?<verb>有没有|含不含|带不带|是不是|没有|不含|有|含|带|是)(?<meat>牛肉|猪肉|鸡肉|鱼肉|羊肉|鸭肉|鹅肉|虾|牛|猪|鸡|鱼|羊|鸭|鹅|肉)(?<de>的)?(?<particle>吗|么|嘛|吧|没|呢)?(?<q>[？?])?$/;
+const MEAT_ASK = /^(?<subject>.*?)(?<verb>有没有|含不含|带不带|是不是|没有|不含|不是|不带|有|含|带|是)(?<meat>牛肉|猪肉|鸡肉|鱼肉|羊肉|鸭肉|鹅肉|虾|牛|猪|鸡|鱼|羊|鸭|鹅|肉)(?<de>的)?(?<particle>吗|么|嘛|吧|没|呢)?(?<q>[？?])?$/;
 const ING_ASK = /^(?<subject>.*?)(?<q>有?(?:什么|啥|哪些)(?:料|配料|成分|食材|酱)|(?:配料|成分|食材)(?:是什么|是啥|是哪些|有什么|有啥|有哪些|是|有|什么|啥|哪些)?|放了(?:什么|啥)|加了(?:什么|啥))(?<tail>[吗么嘛吧呢啊呀？?]*)$/;
 const PARTS_HINT = /^(?<subject>.*?)(?<hint>有什么东西|有啥东西|有哪些东西|里面|里头|都有|包括|包含|组成|搭配是|里)(?<rest>.*)$/;
+// 什么|啥|哪些|吗|么|呢|？|? — rest must carry one of these. 有什么东西/有啥东西/有哪些东西 already do.
+const QUESTION_SIGNAL = /什么|啥|哪些|吗|么|呢|？|\?/;
 const WHAT_ASK = /^(?<subject>.+?)有(?:什么|啥|哪些)(?<tail>[吗么嘛吧呢啊呀？?]*)$/;
 const PRODUCT_SUFFIX = /^(?<mod>.+)(?<kind>随心配|套餐|件套|桶|小食盘|双人餐|单人餐)$/;
-const DEICTIC = /^(?:这个|它|这份|这餐|这套|这一份|这一餐)(?:里面|里头|里)?(?:套餐|餐)?$|^(?:这里面|里面|里头|这里)$/;
+// Pronoun, optional measure, optional food kind (FOOD_KINDS, not a hand-written list), optional 里.
+const DEICTIC = new RegExp(`^(?:这|那|这个|那个|它|这份|这餐|这套|这一份|这一餐)(?:个|款|份)?(?:${FOOD_KINDS.map(escape).join('|')})?(?:里面|里头|里)?$`);
 const BARE_KIND = new Set(FOOD_KINDS);
 
 const cleanLead = (s) => String(s || '').replace(/^(?:请问|问一下|想问)/, '').replace(/^那(?=这个|它|这份|这餐|这套|里面)/, '').replace(/的+$/g, '').trim();
@@ -149,7 +152,7 @@ function meatLabel(token) {
   return token.slice(0, 1);
 }
 function confirmOf(verb) {
-  if (verb === '没有' || verb === '不含') return 'not';
+  if (verb === '没有' || verb === '不含' || verb === '不是' || verb === '不带') return 'not';
   if (A_NOT_A.has(verb)) return null;
   return 'has';
 }
@@ -207,8 +210,17 @@ export function parseInfoQuery(text, names) {
   if (INFO_PICK.test(t)) return null;
   const hinted = PARTS_HINT.exec(t);
   if (hinted) {
-    const hint = hinted.groups.hint;
-    const target = targetOf(hinted.groups.subject, products, { hintDeictic: hint === '里面' || hint === '里头' || hint === '里' });
+    const { subject, hint, rest } = hinted.groups;
+    // '有什么东西' keeps the question inside the hint, so its rest may be empty. Anything else
+    // ('家里有小孩' / '我都有点饿了') is not a composition question.
+    if (!QUESTION_SIGNAL.test(rest) && !/什么|啥|哪些/.test(hint)) return null;
+    // A bare 里 only points at this meal or a real product. '公司里加班' is not one.
+    if (hint === '里') {
+      const lead = cleanLead(subject);
+      const core = lead.replace(/(?:里面|里头|里)$/g, '');
+      if (!DEICTIC.test(lead) && !DEICTIC.test(core) && !isConcreteProduct(core, products)) return null;
+    }
+    const target = targetOf(subject, products, { hintDeictic: hint === '里面' || hint === '里头' || hint === '里' });
     if (target) return { kind: 'parts', target };
     return null;
   }

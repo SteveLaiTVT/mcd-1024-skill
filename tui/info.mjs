@@ -111,14 +111,23 @@ function partLines(parts) {
 }
 
 export function answerParts({ name = '', parts = [], detail = null, detailError = null, storeName = '' }) {
-  if (detail?.plain) return { kind: 'parts', plain: true, name: detail.name || name, storeName, parts, detail, detailError };
-  return { kind: 'parts', plain: false, name: detail?.name || name, storeName, parts, rounds: detail?.rounds || [], detailError };
+  // The caller passes the receipt title. The detail name is only a fallback when that is empty.
+  const title = name || detail?.name || '';
+  if (detail?.plain) return { kind: 'parts', plain: true, name: title, storeName, parts, detail, detailError };
+  return { kind: 'parts', plain: false, name: title, storeName, parts, rounds: detail?.rounds || [], detailError };
 }
 
 function extraRows(detail) {
   if (!detail) return [];
   const rows = [];
-  if (detail.extras?.length) rows.push({ where: detail.name, names: detail.extras });
+  const loose = [];
+  for (const extra of detail.extras || []) {
+    // Merged picks annotate each removable name with the item it came from.
+    if (extra && typeof extra === 'object' && Array.isArray(extra.names)) {
+      if (extra.names.length) rows.push({ where: extra.where ?? detail.name, names: extra.names });
+    } else if (extra) loose.push(String(extra));
+  }
+  if (loose.length) rows.push({ where: detail.name, names: loose });
   for (const c of selectedChoices(detail)) if (c.extras?.length) rows.push({ where: c.name, names: c.extras });
   return rows;
 }
@@ -134,11 +143,21 @@ function meatClause(names, { colon = false } = {}) {
   return colon ? `按产品名判定：${labels.join('、')}` : `按产品名判定含${labels.join('、')}`;
 }
 
+// Map one allergy record onto a MEAT_KINDS label. 牛奶 misses /牛(?!奶)/. 蛋 records stay out
+// (鸡蛋 must not count as 鸡肉). The warning quotes the original record, not the label.
+function allergyLabel(record) {
+  const text = String(record ?? '');
+  if (!text || text.includes('蛋')) return '';
+  return MEAT_KINDS.find((k) => k.ask.test(text))?.label || '';
+}
+
 function allergyLine(meat, allergies, P) {
   if (!allergies?.length || !meat) return '';
-  const keys = meat === '肉' ? MEAT_KINDS.map((k) => k.label) : [meat, meat.replace(/肉$/, '')];
-  const hit = allergies.find((a) => keys.some((k) => k && (a === k || a.includes(k) || k.includes(a))));
-  return hit ? P.yellow(`你记录了对${meat}过敏，名称判定只是参考，请以门店确认为准`) : '';
+  const hit = allergies.find((a) => {
+    const label = allergyLabel(a);
+    return label && (meat === '肉' || label === meat);
+  });
+  return hit ? P.yellow(`你记录了对${hit}过敏，名称判定只是参考，请以门店确认为准`) : '';
 }
 
 function renderMeat(answer, P, allergies) {
