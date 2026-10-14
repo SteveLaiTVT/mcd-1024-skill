@@ -21,7 +21,7 @@ export function receiptFrom(plan, { storeName, at, report }) {
   const cheaper = candidates.filter((p) => Number.isSafeInteger(p.priceFen) && p.priceFen < plan.priceFen).length;
   return { title: plan.title, parts: (plan.parts || []).map((p) => ({ name: p.name, quantity: p.quantity })), priceFen: plan.priceFen,
     savingFen: plan.savingFen > 0 ? plan.savingFen : 0, couponNames: [...(plan.couponNames || [])], storeName: storeName || '未选门店',
-    at: new Date(at).toISOString(), people: request.people || plan.people || 1, sample: report?.sourceKind === 'demo-snapshot',
+    at: new Date(at).toISOString(), people: 1, sample: report?.sourceKind === 'demo-snapshot',
     mainCodes: [...(plan.mainCodes || [])],
     request: { budgetPerPersonFen: request.budgetPerPersonFen ?? null, wantMainCodes: [...(request.wantMainCodes || [])] },
     priceRank: candidates.length ? { cheaper, of: candidates.length } : null };
@@ -48,7 +48,6 @@ export function renderReceipt(r, P, { color = P.enabled, columns, note = '' } = 
     `门店：${r.storeName}`, `时间：${chinaTime(r.at)}`, rule, P.bold(r.title),
     ...r.parts.map((p) => row(`  ${p.name}`, `×${p.quantity}`)), rule,
     row(`整单（${r.sample ? '历史样本价' : '官方核价'}）`, P.bold(money(r.priceFen))),
-    ...(r.people > 1 ? [row(`人均约（${r.people} 人）`, money(Math.ceil(r.priceFen / r.people)))] : []),
     ...(r.savingFen > 0 ? [row('券已省', money(r.savingFen)), P.gray(`  用券：${r.couponNames.join('、')}`)] : [row('券已省', '—')]),
     ...(note ? [`备注：${note}`] : []),
     rule, ...qrBlock(card.url, { color, columns, label: P.bold(QR_LABEL) }),

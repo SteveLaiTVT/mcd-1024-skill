@@ -39,11 +39,11 @@ test('emptyCause names the real cause; only budget may suggest raising the budge
 
   const budgetCard = renderEmpty({ ...base, quotedPlans: [{ fitsPortion: true, withinBudget: false, priceFen: 3000, title: 'X' }] }, P);
   assert.equal(budgetCard.title, '预算不够');
-  assert(budgetCard.lines.join('').includes('把人均预算提到'), 'budget is the only cause that suggests raising the budget');
+  assert(budgetCard.lines.join('').includes('把预算提到'), 'budget is the only cause that suggests raising the budget');
   const apiCard = renderEmpty({ ...base, menu: { ok: false, error: 'timeout', items: [] }, failedPlans: [{ cause: 'api', reason: 'timeout' }] }, P);
   assert.equal(apiCard.title, '接口异常');
   assert(apiCard.lines.join('').includes('不是预算问题'), 'api failure must say it is not a budget problem');
-  assert(!apiCard.lines.join('').includes('把人均预算提到'), 'api failure must never suggest raising the budget');
+  assert(!apiCard.lines.join('').includes('把预算提到'), 'api failure must never suggest raising the budget');
   const menuCard = renderEmpty({ ...base, failedPlans: [{ cause: 'menu', title: '酥脆无双套餐', reason: '当前门店套餐或搭配不可用' }] }, P);
   assert.equal(menuCard.title, '这家店查不到这些套餐');
   assert(menuCard.lines.join('').includes('提高预算也没用'), 'menu failure must say raising the budget does not help');

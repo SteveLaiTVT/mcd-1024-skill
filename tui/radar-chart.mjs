@@ -13,7 +13,7 @@ const RECENT_ORDERS = 6; // Same window as the 最近吃了啥 list.
 // [{ key, label, value (0..1 or null), basis }] in drawing order (clockwise from the top).
 export function radarAxes(r, { history = null, feedback = [], mainNames = new Map() } = {}) {
   const name = (code) => mainNames.get(code) || code;
-  const budget = r.request?.budgetPerPersonFen > 0 ? r.request.budgetPerPersonFen * (r.people || 1) : null;
+  const budget = r.request?.budgetPerPersonFen > 0 ? r.request.budgetPerPersonFen : null;
   const price = budget == null ? null : clamp((budget - r.priceFen) / budget); // share of the budget left over
 
   const recent = history?.orders?.slice(0, RECENT_ORDERS) || [], eaten = new Set(recent.flatMap((o) => o.mainCodes || []));

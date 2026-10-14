@@ -56,7 +56,7 @@ test('no wanted main in the pool → no silent substitution; the empty card name
   const card = renderEmpty(report, P);
   assert.equal(card.title, '预算内没有你点的');
   assert(card.lines.join('').includes('双层吉士汉堡套餐'), 'the card names the wanted main');
-  assert(card.lines.join('').includes('把人均预算提到'), 'over-budget for the wanted main may suggest raising it');
+  assert(card.lines.join('').includes('把预算提到'), 'over-budget for the wanted main may suggest raising it');
   assert(!card.lines.join('').includes('酥脆无双'), 'the card must not substitute chicken');
 });
 

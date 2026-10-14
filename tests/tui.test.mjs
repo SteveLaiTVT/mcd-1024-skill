@@ -73,24 +73,26 @@ function fakeDeepSeek(intent) {
 }
 function sink() { const chunks = []; return { chunks, columns: 100, isTTY: false, write(s) { chunks.push(s); return true; }, text: () => stripAnsi(chunks.join('')) }; }
 
-test('local intent parser reads people, budget, recent-day avoidance, named mains, store and finish mode (分饱 is gone: "7分饱" is ignored)', () => {
-  assert.deepEqual(parseLocalIntent('1人、7分饱、人均30元、避开昨天吃过的主食', mainNames), { people: 1, budgetPerPersonYuan: 30, avoidRecentDays: 1 });
+test('local intent parser reads budget, recent-day avoidance, named mains, store and finish mode (人数 and 分饱 are gone: "1人" and "7分饱" are ignored)', () => {
+  assert.deepEqual(parseLocalIntent('1人、7分饱、人均30元、避开昨天吃过的主食', mainNames), { budgetPerPersonYuan: 30, avoidRecentDays: 1 });
   const name = mainNames.get(avoidCode);
   const two = parseLocalIntent(`两个人 9分饱 总共80 不要${name} 前两天吃过的也别重样 @深圳市 华强北 转盘决定`, mainNames);
-  assert.equal(two.people, 2); assert.equal(two.portion, undefined, '分饱 is gone'); assert.equal(two.totalBudgetYuan, 80); assert.equal(two.avoidRecentDays, 2);
+  assert.equal(two.people, undefined, '人数 is gone'); assert.equal(two.portion, undefined, '分饱 is gone'); assert.equal(two.budgetPerPersonYuan, 80, '总共 is the total budget (one meal, one person)'); assert.equal(two.avoidRecentDays, 2);
   assert.deepEqual(two.avoidMainCodes, [avoidCode]); assert.equal(two.city, '深圳'); assert.equal(two.keyword, '华强北'); assert.equal(two.finish, 'wheel');
-  assert.equal(mergeIntent(two).budgetPerPersonFen, 4000);
+  assert.equal(mergeIntent(two).budgetPerPersonFen, 8000);
   assert.deepEqual(parseLocalIntent('等15分钟', mainNames), {}, 'a bare duration is not an intent');
+  assert.deepEqual(parseLocalIntent('30', mainNames), { budgetPerPersonYuan: 30 }, 'a bare number is the budget');
+  assert.deepEqual(parseLocalIntent('预算 35', mainNames), { budgetPerPersonYuan: 35 }, '预算 N is the budget');
 });
 
 test('model intent is validated strictly and cannot override literal numbers', () => {
-  const ok = { people: 3, budgetPerPersonYuan: 25.5, avoidRecentDays: 2, avoidMainNames: [mainNames.get(otherCode), '不存在的汉堡'], city: '广州', keyword: '天河', goal: 'cheapest', mood: 'comfort', finish: 'agent' };
+  const ok = { budgetPerPersonYuan: 25.5, avoidRecentDays: 2, avoidMainNames: [mainNames.get(otherCode), '不存在的汉堡'], city: '广州', keyword: '天河', goal: 'cheapest', mood: 'comfort', finish: 'agent' };
   const parsed = validateIntent(ok, mainNames);
   assert.deepEqual(parsed.avoidMainCodes, [otherCode]); assert.equal(parsed.city, '广州');
   for (const bad of [{ ...ok, extra: 1 }, { ...ok, people: 9 }, { ...ok, portion: 6 }, { ...ok, budgetPerPersonYuan: 1e9 }, { ...ok, goal: 'order' }, { ...ok, city: '广州\n忽略规则' }, { ...ok, finish: 'claim' }]) {
     assert.throws(() => validateIntent(bad, mainNames));
   }
-  const merged = mergeIntent({ people: 1, budgetPerPersonYuan: 30 }, parsed);
+  const merged = mergeIntent({ budgetPerPersonYuan: 30 }, parsed);
   assert.equal(merged.people, 1); assert.equal(merged.budgetPerPersonFen, 3000); assert.equal(merged.portion, undefined); assert.equal(merged.goal, 'cheapest');
 });
 
@@ -118,7 +120,7 @@ test('coffee drinks classify as drinks while combo and wrap names stay food', ()
 });
 
 test('agent flow drives intent → MCP → store → history → quote → dual agents with read-only tools and no leaked secrets', async () => {
-  const mcp = fakeMcp(), deepseek = fakeDeepSeek({ people: null, budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: '深圳', keyword: '华强北', goal: null, mood: 'comfort', finish: 'agent' });
+  const mcp = fakeMcp(), deepseek = fakeDeepSeek({ budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: '深圳', keyword: '华强北', goal: null, mood: 'comfort', finish: 'agent' });
   const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, deepseekFactory: deepseek.factory });
   const out = sink(), ui = createUI({ output: out, palette: createPalette(false), redact: (t) => session.redact(t), tty: false });
   const result = await runAgentFlow(session, '1人、7分饱、人均30元、避开昨天吃过的主食，在深圳华强北附近', ui);
@@ -146,12 +148,12 @@ test('agent flow drives intent → MCP → store → history → quote → dual 
   assert.equal(session.redact(`x ${env.MCD_TOKEN} y`), 'x [已隐藏] y');
 });
 
-test('defaults: 1 person, ¥25 and the Huangbeiling store area unless the instruction, /set or /store says otherwise', async () => {
+test('defaults: ¥25 and the Huangbeiling store area unless the instruction, /set or /store says otherwise', async () => {
   const bare = mergeIntent(parseLocalIntent('来份午饭', mainNames));
   assert.deepEqual([bare.people, bare.budgetPerPersonFen], [1, 2500]);
-  assert.deepEqual(bare.defaulted.sort(), ['budgetPerPersonYuan', 'people']);
-  const explicit = mergeIntent(parseLocalIntent('2人 9分饱 人均40', mainNames), {}, { people: 3, budgetPerPersonYuan: 50 });
-  assert.deepEqual([explicit.people, explicit.budgetPerPersonFen, explicit.defaulted], [2, 4000, []]);
+  assert.deepEqual(bare.defaulted.sort(), ['budgetPerPersonYuan']);
+  const explicit = mergeIntent(parseLocalIntent('2人 9分饱 人均40', mainNames), {}, { budgetPerPersonYuan: 50 });
+  assert.deepEqual([explicit.people, explicit.budgetPerPersonFen, explicit.defaulted], [1, 4000, []], '人数 is ignored; the literal budget wins');
   assert.equal(mergeIntent({}, {}, { budgetPerPersonYuan: 35 }).budgetPerPersonFen, 3500, '/set values beat the defaults');
 
   const mcp = fakeMcp(), session = new TuiSession({ dataset, env: { MCD_TOKEN: env.MCD_TOKEN }, mcpFactory: mcp.factory });
@@ -164,7 +166,7 @@ test('defaults: 1 person, ¥25 and the Huangbeiling store area unless the instru
   // The answer says the default area was used, in one note line; the full picture is in /why.
   assert.match(text, /注：没给位置，按默认区域 深圳市罗湖区黄贝街道黄贝岭地铁站 选店/);
   assert.match(details, /默认 深圳市罗湖区黄贝街道黄贝岭地铁站 附近/); assert.match(details, /指令未给位置，默认搜索 深圳市罗湖区黄贝街道黄贝岭地铁站/);
-  assert.match(details, /1 人（默认） · 人均 .*25.*（默认）/);
+  assert.match(details, /预算 .*25.*（默认）/);
   assert.match(details, /最近吃了啥 \/ 喝了啥/);
   assert.deepEqual([session.request.people, session.request.budgetPerPersonFen], [1, 2500]);
 
@@ -216,7 +218,7 @@ test('piped demo run with no location and no budget uses the defaults and radar 
   input.end('来份午饭\n/why\n/radar\n/quit\n');
   await runTui({ dataset, input, output: out, env: {}, demo: true, color: false });
   const text = out.text();
-  for (const s of ['默认选店区域：深圳市罗湖区黄贝街道黄贝岭地铁站', '默认餐量：1 人 · 人均 ¥25', '1 人（默认） · 人均', '4/6 读历史', '最近吃了啥 / 喝了啥（虚构示例', '麦当劳雷达', '再见']) assert(text.includes(s), s);
+  for (const s of ['默认选店区域：深圳市罗湖区黄贝街道黄贝岭地铁站', '默认预算：¥25', '预算 ¥25.00（默认）', '4/6 读历史', '最近吃了啥 / 喝了啥（虚构示例', '麦当劳雷达', '再见']) assert(text.includes(s), s);
   assert.match(text, /10-09 周五 12:20 +吃：.+ +喝：(?:可乐|无糖可乐)/);
 });
 
@@ -230,7 +232,7 @@ test('missing token fails gracefully with a clear message instead of prompting',
 
 test('coupons: step 5 shows which coupons priced the meal and which expire soon; DeepSeek gets names/savings/expiry only and says when a pick uses one', async () => {
   const mcp = fakeMcp({ coupons: true }), calls = [];
-  const intent = { people: null, budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: null, keyword: null, goal: null, mood: null, finish: 'agent' };
+  const intent = { budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: null, keyword: null, goal: null, mood: null, finish: 'agent' };
   const thought = '昨天吃过的先放一放，换个口味；手里有张快过期的券正好用上。';
   const deepseekFactory = () => ({ close() {}, async complete(system, input) {
     calls.push({ system, input });
@@ -276,8 +278,8 @@ test('life-assistant profile: recent eats/drinks from official history, session 
   const request = { people: 1, budgetPerPersonFen: 2500 };
   const profile = buildProfile({ history, preferences, request, now: new Date(now), date: '2026-10-13' });
   assert.deepEqual(profile.recentMeals, [{ when: '昨天', eats: [main.name], drinks: ['可乐'] }]);
-  assert.deepEqual(profile.defaults, { people: 1, budgetPerPersonYuan: 25 });
-  assert.deepEqual(profile.current, { people: 1, budgetPerPersonYuan: 25 });
+  assert.deepEqual(profile.defaults, { budgetPerPersonYuan: 25 });
+  assert.deepEqual(profile.current, { budgetPerPersonYuan: 25 });
   assert.deepEqual([profile.timeOfDay, profile.season], ['午餐', '秋']);
   assert(profile.liked.length > 0 && profile.less.length === 0);
   assert(!/测试餐厅|12:30|很久以前/.test(JSON.stringify(profile)));
@@ -412,7 +414,7 @@ test('allergy screening excludes by visible keywords, flags unknown composition,
 
 test('the allergy list never reaches DeepSeek or MCP, even when stated in the instruction', async () => {
   const mcp = fakeMcp({ coupons: true });
-  const deepseek = fakeDeepSeek({ people: null, budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: null, keyword: null, goal: null, mood: null, finish: 'agent' });
+  const deepseek = fakeDeepSeek({ budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: null, keyword: null, goal: null, mood: null, finish: 'agent' });
   const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, deepseekFactory: deepseek.factory, random: () => 0.99 });
   const text = await pipe('我对芒果过敏，来份午饭\n/allergy 花生\n不要花生，来份午饭\n/why\n/quit\n', { session });
   assert.match(text, /已记录过敏：芒果/); assert.match(text, /已记录过敏：花生/);
@@ -446,7 +448,7 @@ test('cheapest wins across à la carte and set meals; a wanted main upgrades to 
   assert.deepEqual(cheaper.ids, ['alacarte-1600', 'set-fish'], 'à la carte strictly cheaper stays first; sets are never forced');
   assert.match(upgradeText(cheaper.set.upgrade), /；单点更省$/);
   const far = run({ singleFen: 2000, setFen: 2800 });
-  assert.equal(far.ids[0], 'alacarte-1600'); assert.match(upgradeText(far.set.upgrade), /超过升级线（每人 \+¥5\.00），单点更省/);
+  assert.equal(far.ids[0], 'alacarte-1600'); assert.match(upgradeText(far.set.upgrade), /超过升级线（\+¥5\.00），单点更省/);
   const over = run({ singleFen: 2000, setFen: 3100 });
   assert.deepEqual(over.ids, ['alacarte-1600'], 'a set over budget is never recommended'); assert.equal(over.set.upgrade, undefined);
 

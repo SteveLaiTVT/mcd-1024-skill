@@ -56,7 +56,7 @@ export function statusLine(session, P) {
   const mcp = s.demo ? P.yellow('样本模式') : s.connected ? P.green('MCP 已连接') : s.hasMcdToken ? P.yellow('MCP 未连接') : P.red('缺 MCD_TOKEN');
   const quote = !s.report ? '未核价' : s.report.sourceKind === 'demo-snapshot' ? '历史样本价' : s.fresh() ? `报价剩 ${clock(remaining)}` : P.red('报价已失效');
   const avoid = r.avoidMainCodes.length ? ` · 避开 ${r.avoidMainCodes.length} 种主食` : '';
-  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · ${r.people}人 人均${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
+  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · 预算${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
 }
 
 // The single line of "why" an answer carries: the assistant's one-liner, else the reason signals.
@@ -71,9 +71,8 @@ export function pickReason(plan) {
 // The one answer a question ends with: the pick, its price, the store and one line of reason.
 // How the agents got there lives in /why, never here.
 export function renderAnswer(plan, P, { storeName = '', report = null, remaining = null, reason = '', notes = [] } = {}) {
-  const people = report?.request?.people || 1;
   const coupon = plan.couponNames?.length ? P.cyan(` · 已用券 ${plan.couponNames.join('、')}${plan.savingFen > 0 ? `，省 ${money(plan.savingFen)}` : ''}`) : '';
-  const lines = [`${P.brand(P.bold(plan.title))}  ${P.bold(money(plan.priceFen))}${people > 1 ? P.gray(`（人均约 ${money(Math.ceil(plan.priceFen / people))}）`) : ''}${coupon}`,
+  const lines = [`${P.brand(P.bold(plan.title))}  ${P.bold(money(plan.priceFen))}${coupon}`,
     `门店：${storeName || '未选门店'} · 到店自取`, `理由：${reason || pickReason(plan)}`];
   if (notes.length) lines.push(P.gray(`注：${notes.join('；')}`));
   if (report?.sourceKind === 'demo-snapshot') lines.push(P.yellow('样本价，仅供体验；实时价格请连接后重新核价。'));
@@ -155,7 +154,7 @@ export function renderActivities(result, P) {
 export function renderReport(report, P, { remaining = null } = {}) {
   const r = report.request, lines = [];
   const source = report.sourceKind === 'demo-snapshot' ? P.yellow('历史样本价（2026-10-10 深圳样本门店），不是实时报价') : `官方整单核价 · ${remaining == null ? '' : `${clock(remaining)} 后失效（最长 5 分钟）`}`;
-  lines.push(`${r.people} 人 · 整顿预算 ${money(r.totalBudgetFen)} · ${source}`);
+    lines.push(`整顿预算 ${money(r.totalBudgetFen)} · ${source}`);
   if (!report.quotedPlans.length) lines.push(P.yellow('这次没有可用的套餐或单点报价。'));
   lines.push(P.gray('按用券后的实际价格从低到高排（单点主食和套餐一起比，同价优先套餐）：'));
   const pool = new Set(report.candidates.map((p) => p.id));
@@ -185,7 +184,7 @@ export function renderPick(plan, P, { report, remaining = null, signals = [], so
   if (heading) lines.push(P.bold(heading));
   lines.push(`${P.brand(P.bold(plan.title))}  ${plan.wheelKind ? P.gray(plan.wheelKind) : ''}`);
   lines.push(`内容：${partsText(plan)}`);
-  lines.push(`整单：${P.bold(money(plan.priceFen))}${report?.request?.people > 1 ? `（人均约 ${money(Math.ceil(plan.priceFen / report.request.people))}）` : ''} · ${plan.priceLabel || ''}`);
+  lines.push(`整单：${P.bold(money(plan.priceFen))} · ${plan.priceLabel || ''}`);
   if (usesCoupon) lines.push(`官方报价已用券：${plan.couponNames.map((n) => couponNote(n, coupons)).join('、')}${plan.savingFen > 0 ? `，比无券基准少 ${money(plan.savingFen)}` : ''}`);
   if (plan.upgrade) lines.push(`${P.cyan('单点 vs 套餐')}：${upgradeText(plan.upgrade)}`);
   // A pick that uses a coupon always says so in its reason, with the saving against the no-coupon baseline.
@@ -220,7 +219,7 @@ export function renderIntent(intent, mainNames, P, { store = '' } = {}) {
   const avoid = intent.avoidMainCodes.map((c) => mainNames.get(c) || c), want = (intent.wantMainCodes || []).map((c) => mainNames.get(c) || c);
   const d = (key) => intent.defaulted?.includes(key) ? P.gray('（默认）') : '';
   return [
-    `${intent.people} 人${d('people')} · 人均 ${money(intent.budgetPerPersonFen)}${d('budgetPerPersonYuan')}`,
+    `预算 ${money(intent.budgetPerPersonFen)}${d('budgetPerPersonYuan')}`,
     ...(want.length ? [`想吃：${want.join('、')}（单点和含它的套餐一起比价）`] : []),
     `避开：${[intent.avoidRecentDays ? `${intent.avoidRecentDays === 1 ? '昨天' : '前两天'}吃过的主食（读历史订单）` : '', avoid.join('、')].filter(Boolean).join('；') || '无'}`,
     `门店：${store || (intent.city ? `${intent.city} · ${intent.keyword}` : '沿用当前门店')} · 目标：${GOAL_LABELS[intent.goal] || '沿用设置'} · 心情：${MOOD_LABELS[intent.mood] || intent.mood} · 揭晓：${intent.finish === 'wheel' ? '转盘' : '饭搭子双 Agent'}`,
@@ -292,7 +291,7 @@ export const COMMAND_HELP = [
   [['coupons'], '/coupons', '先列可领券（名称 · 可省 · 有效期），再列持有券；只查看，不领取', ['券', '优惠', '券包', '可领']],
   [['claim'], '/claim', '领取全部可领券（先列出可领券，需输入 yes 明确确认）', ['领券', '领取', '券']],
   [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与；也可以说“有什么活动”', ['活动', '日历', '报名']],
-  [['set'], '/set 人数 人均预算', '例：/set 2 35', ['人数', '预算']],
+  [['set'], '/set 预算', '例：/set 35', ['预算']],
   [['avoid'], '/avoid [主食名…|clear]', '查看或切换要避开的主食', ['避开', '不吃', '主食']],
   [['allergy'], '/allergy [过敏原…]', '不带参数列出，带参数添加（如 /allergy 花生 虾）；也可以说“我对花生过敏”', ['过敏', '忌口']],
   [['allergy-clear'], '/allergy-clear 过敏原', '删除一项过敏记录', ['过敏', '删除']],
@@ -322,8 +321,8 @@ export function helpLines(P) {
   const c = (cmd, text) => `${P.cyan(padEnd(cmd, 26))}${text}`;
   return [
     P.bold('直接输入一句话 → Agent 在后台走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选，最后只给一个答案'),
-    P.gray('  例：1人、人均30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
-    P.gray(`  没写的默认：${DEFAULT_INTENT.people} 人 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
+    P.gray('  例：预算30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
+    P.gray(`  没写的默认：预算 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
     P.gray('  /why 查看上一次的完整过程（每一步的结果、两个 Agent 的选择与备选）'),
     P.gray('  输入 / 立即弹出命令面板（按前缀过滤，带说明和关键词）：↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭'),
     `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 就这个 / 要这个 / 下单；到店自取，不支持外送）')}`,

@@ -26,12 +26,12 @@ export function fallbackPicks(items, request, limit = MENU_FALLBACK_LIMIT) {
 }
 
 export function menuPlan(item, cart, request, quote, mainCodes = new Set()) {
-  const people = request.people, name = cart.name || item.name;
-  return { id: `menu-${item.code}`, kind: 'menu', people, title: people > 1 ? `${people}人 · ${name} × ${people}` : name,
-    wheelTitle: name, wheelKind: '门店菜单', packages: cart.items[0]?.roundList ? [{ productCode: item.code, name, quantity: people }] : [],
+  const name = cart.name || item.name;
+  return { id: `menu-${item.code}`, kind: 'menu', people: 1, title: name,
+    wheelTitle: name, wheelKind: '门店菜单', packages: cart.items[0]?.roundList ? [{ productCode: item.code, name, quantity: 1 }] : [],
     parts: cart.parts, mainCodes: [...new Set(cart.parts.filter((p) => mainCodes.has(p.code)).map((p) => p.code))], priceLabel: '官方核价（门店实际菜单）',
     basePriceFen: quote.basePriceFen, priceFen: quote.priceFen, savingFen: quote.savingFen, couponNames: quote.couponNames || [], quotedAt: quote.quotedAt,
-    orderItems: (quote.orderItems || []).map(stripCoupons), takeWays: quote.takeWays || [], withinBudget: quote.priceFen <= people * request.budgetPerPersonFen };
+    orderItems: (quote.orderItems || []).map(stripCoupons), takeWays: quote.takeWays || [], withinBudget: quote.priceFen <= request.budgetPerPersonFen };
 }
 
 // Live: one official whole-cart quote per picked menu item (same coupon comparison as set meals).
@@ -41,7 +41,7 @@ export async function liveMenuPlans(client, context, picks, request, coupons, ma
   for (const [i, m] of picks.entries()) {
     onProgress({ step: 4, text: `模板套餐这家店不可用，按门店实际菜单核价（${i + 1} / ${picks.length}）…` });
     try {
-      const cart = await menuItemCart(client, common, m.code, request.people, m.name);
+      const cart = await menuItemCart(client, common, m.code, 1, m.name);
       if (cart.parts.some((p) => avoid.has(p.code))) { excluded.push({ id: `menu-${m.code}`, title: m.name, reason: '避开最近吃过的主食' }); continue; }
       plans.push(menuPlan(m, cart, request, await quoteBest(client, common, cart.items, coupons), mainCodes));
     } catch (e) { failed.push({ id: `menu-${m.code}`, title: m.name, cause: 'api', reason: `门店菜单核价失败：${e?.message || '未返回'}` }); }
@@ -78,7 +78,7 @@ export async function quoteMenuItems(client, context, matches, coupons, limit = 
 // Why a pick came back with no candidate. Only 'budget' and 'want' (over budget for the
 // named main) may ever suggest raising the budget.
 export function emptyCause(report) {
-  const quoted = report.quotedPlans || [], failed = report.failedPlans || [], people = report.request?.people || 1;
+  const quoted = report.quotedPlans || [], failed = report.failedPlans || [];
   // The user named a main (applyUpgrades set wantMissed) and none is in the pool: say so,
   // with the cheapest wanted plan even when it is over budget. Skip when allergy filtering
   // removed things — then the filtered/menu logic below explains it better.
@@ -93,7 +93,7 @@ export function emptyCause(report) {
   }
   if (quoted.length && !quoted.some((p) => p.withinBudget)) {
     const cheapest = [...quoted].sort((a, b) => a.priceFen - b.priceFen)[0];
-    return { cause: 'budget', cheapest, perPersonFen: Math.ceil(cheapest.priceFen / people) };
+    return { cause: 'budget', cheapest, perPersonFen: cheapest.priceFen };
   }
   if (quoted.some((p) => p.withinBudget) || report.allergy?.excluded?.length || (report.excludedPlans || []).length) return { cause: 'filtered' };
   const api = failed.filter((p) => p.cause === 'api');
@@ -112,15 +112,15 @@ export function renderEmpty(report, P) {
   const showMenu = available.length ? [`这家店现在能点的（菜单价，未核价）：${menuLine(available)}`, P.gray('想知道某样多少钱，直接问“巨无霸多少钱”。')] : [];
   if (why.cause === 'budget') {
     const c = why.cheapest, perPerson = why.perPersonFen;
-    return { title: '预算不够', lines: [P.yellow(`预算内没有候选：最便宜的「${c.title}」要 ${money(c.priceFen)}${r.people > 1 ? `（人均约 ${money(perPerson)}）` : ''}，你的人均预算是 ${money(r.budgetPerPersonFen)}。`),
-      `把人均预算提到 ${money(perPerson)} 就能选到它，例如说“人均 ${Math.ceil(perPerson / 100)}”。`, P.gray('/why 查看核价明细')] };
+    return { title: '预算不够', lines: [P.yellow(`预算内没有候选：最便宜的「${c.title}」要 ${money(c.priceFen)}，你的预算是 ${money(r.budgetPerPersonFen)}。`),
+      `把预算提到 ${money(perPerson)} 就能选到它，例如说“预算 ${Math.ceil(perPerson / 100)}”。`, P.gray('/why 查看核价明细')] };
   }
   if (why.cause === 'want') {
     const names = why.names || '你点的';
     if (why.cheapest) {
-      const c = why.cheapest, perPerson = Math.ceil(c.priceFen / (r.people || 1));
-      return { title: '预算内没有你点的', lines: [P.yellow(`预算内没有含「${names}」的选项。最便宜的含你点的是「${c.title}」${money(c.priceFen)}${r.people > 1 ? `（人均约 ${money(perPerson)}）` : ''}。`),
-        `把人均预算提到 ${money(perPerson)} 就能选它，例如说“人均 ${Math.ceil(perPerson / 100)}”。`, ...showMenu, P.gray('/why 查看核价明细')] };
+      const c = why.cheapest, perPerson = c.priceFen;
+      return { title: '预算内没有你点的', lines: [P.yellow(`预算内没有含「${names}」的选项。最便宜的含你点的是「${c.title}」${money(c.priceFen)}。`),
+        `把预算提到 ${money(perPerson)} 就能选它，例如说“预算 ${Math.ceil(perPerson / 100)}”。`, ...showMenu, P.gray('/why 查看核价明细')] };
     }
     return { title: '这家店没有你点的', lines: [P.yellow(`这家店没有含「${names}」的选项（菜单里没有，或都被排除了）。`), ...showMenu, P.gray('/why 查看核价明细')] };
   }
@@ -150,18 +150,18 @@ export function renderPriceAnswer(result, P, { storeName = '' } = {}) {
     if (cheapest.length) lines.push(`这家店能点的最便宜的（菜单价）：${menuLine(cheapest, 5)}`);
   } else if (result.sample) {
     const m = result.matches[0];
-    lines.push(`${P.brand(P.bold(m.name))}  ${P.bold(money(m.priceFen))} ${P.gray('菜单样本价')}`, `最低预算：人均 ${money(m.priceFen)} 就够吃到「${ask}」。`);
+    lines.push(`${P.brand(P.bold(m.name))}  ${P.bold(money(m.priceFen))} ${P.gray('菜单样本价')}`, `最低预算：${money(m.priceFen)} 就够吃到「${ask}」。`);
     if (result.matches.length > 1) lines.push(`同类还有：${menuLine(result.matches.slice(1), 5)}`);
     lines.push(P.yellow('样本价，仅供体验；实时价格请连接后再问。'));
   } else if (result.quoted.length) {
     const best = result.quoted[0], coupon = best.couponNames.length ? P.cyan(` · 已用券 ${best.couponNames.join('、')}，原价 ${money(best.basePriceFen)}`) : '';
     lines.push(`${P.brand(P.bold(best.name))}  ${P.bold(money(best.priceFen))} ${P.gray('官方核价 · 到店自取')}${coupon}`,
-      `最低预算：人均 ${money(best.priceFen)} 就能吃到「${ask}」（单点一份）。`);
+      `最低预算：${money(best.priceFen)} 就能吃到「${ask}」（单点一份）。`);
     const others = [...result.quoted.slice(1).map((q) => `${q.name} ${money(q.priceFen)}`), ...result.matches.filter((m) => !result.quoted.some((q) => q.code === m.code)).slice(0, 4).map((m) => `${m.name} ${m.priceFen != null ? `${money(m.priceFen)}（菜单价）` : ''}`)];
     if (others.length) lines.push(`同类还有：${others.join('、')}`);
   } else {
     lines.push(P.yellow(`找到了「${ask}」，但这次官方核价没有成功（${result.failed[0]?.reason || '未返回'}）。`), `菜单价：${menuLine(result.matches, 5)}`);
   }
-  lines.push(`门店：${storeName || '未选门店'}`, P.gray('想直接挑一餐就说“人均 30 来一份”。'));
+  lines.push(`门店：${storeName || '未选门店'}`, P.gray('想直接挑一餐就说“预算 30 来一份”。'));
   return lines;
 }

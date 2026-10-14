@@ -4,7 +4,7 @@
 import { padEnd, fit } from './ansi.mjs';
 import { COMMAND_HELP } from './render.mjs';
 
-// Usage with a required argument ('/use 序号', '/set 人数 …'): Enter fills the input instead of running it.
+// Usage with a required argument ('/use 序号', '/set 预算'): Enter fills the input instead of running it.
 const needsArgs = (usage) => /^\/\S+\s+[^[·\s]/.test(usage);
 export const COMMANDS = COMMAND_HELP.map(([names, usage, text, keywords = []]) => ({ name: names[0], aliases: names.slice(1), usage, text, keywords, needsArgs: needsArgs(usage) }));
 

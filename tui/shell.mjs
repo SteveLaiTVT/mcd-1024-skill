@@ -90,9 +90,8 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
     },
     set(args) {
       try {
-        const [people, budget] = args;
+        const [budget] = args;
         const change = {};
-        if (people !== undefined) { if (!['1', '2', '3', '4'].includes(people)) throw new TuiError('人数请填 1–4。'); change.people = Number(people); }
         if (budget !== undefined) change.budgetPerPersonFen = budgetFen(budget);
         session.setProfile(change); ui.write(statusLine(session, P));
       } catch (e) { ui.error(e.message); }
@@ -181,7 +180,7 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
     },
     why() {
       const d = session.lastDetails;
-      if (!d) return ui.info('还没有挑选过程：先说一句话（比如“1人 人均30”）或 /buddy。');
+      if (!d) return ui.info('还没有挑选过程：先说一句话（比如“预算30”）或 /buddy。');
       ui.panel(`挑选过程 · ${d.query}`, d.lines, 'cyan');
     },
     prefs(args) {
@@ -375,11 +374,11 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
         `MCD_TOKEN：${session.demo ? '样本模式未使用' : session.hasMcdToken ? P.green('已从环境变量读取（不显示、不保存）') : P.red('未设置')}`,
         `DEEPSEEK_API_KEY：${session.hasDeepSeek ? P.green('已从环境变量读取（不显示、不保存）') : P.yellow(session.deepseekNote || '未设置，饭搭子使用本地偏好推荐')}`,
         `默认选店区域：${P.bold(DEFAULT_STORE_SEARCH.label)}${session.demo ? P.gray('（样本模式不搜索，用样本门店）') : ''}`,
-        `默认餐量：${DEFAULT_INTENT.people} 人 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}`,
+        `默认预算：¥${DEFAULT_INTENT.budgetPerPersonYuan}`,
         `过敏记录：${session.allergies.length ? P.bold(session.allergies.join('、')) : '无'}${session.profileError ? P.red(`（${session.profileError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机，本地筛选，从不发送；/allergy 管理）')}`,
         `购物车：${cartOf(session.orders).length} 单 · 未 push ${unpushed(session.orders).length} 个提交${session.ordersError ? P.red(`（${session.ordersError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机，不是订单；/cart 查看）')}`,
         ...(session.pendingOrder() ? [P.yellow(`有 ${session.orders.placed.filter((o) => o.status === PENDING).length} 笔真实订单待支付：/order 查看`)] : []),
-        P.gray('指令里写明的人数 / 预算 / 位置（@城市 关键词）优先；/set、/store 也会覆盖默认。'),
+        P.gray('指令里写明的预算 / 位置（@城市 关键词）优先；/set、/store 也会覆盖默认。'),
         P.gray('输入 / 打开命令面板；选好一餐后说 就吃这个了 直接下单（到店自取）：先列出要领的券，回答“是这家店”才领券并下单，付款在麦当劳支付链接或 App。'),
       ]);
       if (autoConnect && !session.demo && session.hasMcdToken) { busy = true; ui.busy(true); try { await commands.connect(); } finally { busy = false; ui.busy(false); } }

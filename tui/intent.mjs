@@ -3,14 +3,13 @@
 // can never add tools, coupons, prices or write actions.
 import { budgetFen } from '../web/meal-engine.mjs';
 
-const DIGITS = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4 };
-const num = (v) => DIGITS[v] ?? Number(v);
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const NEGATION = '(?:不要|避开|别|不吃|不想吃|除了|跳过)';
 export const GOALS = ['balanced', 'cheapest', 'variety'];
 export const MOODS = ['normal', 'comfort', 'surprise', 'gathering'];
-// Used whenever neither the instruction nor /set gives a value.
-export const DEFAULT_INTENT = Object.freeze({ people: 1, budgetPerPersonYuan: 25 });
+// Used whenever neither the instruction nor /set gives a value. The TUI is one meal
+// for one person: there is no people setting, and the budget is the total for the meal.
+export const DEFAULT_INTENT = Object.freeze({ budgetPerPersonYuan: 25 });
 // Store search used when the instruction gives no location and no store was picked with /store.
 export const DEFAULT_STORE_SEARCH = Object.freeze({ city: '深圳', keyword: '黄贝岭地铁站', label: '深圳市罗湖区黄贝街道黄贝岭地铁站' });
 const place = (v) => typeof v === 'string' && /^[一-鿿A-Za-z0-9·()（）-]{2,20}$/.test(v.trim()) ? v.trim() : null;
@@ -18,12 +17,12 @@ const place = (v) => typeof v === 'string' && /^[一-鿿A-Za-z0-9·()（）-]{2,
 export function parseLocalIntent(text, mainNames = new Map()) {
   const t = String(text || '').normalize('NFKC').trim(), intent = {};
   let m;
-  if ((m = /([1-4一两二三四])\s*(?:个)?(?:人|位)/.exec(t))) intent.people = num(m[1]);
-  else if (/双人|两个人/.test(t)) intent.people = 2;
-  else if (/单人|一个人|自己吃/.test(t)) intent.people = 1;
+  // Budget: '人均 30', '预算 30', '总共 80', '30 元', or a bare '30' — all mean the total
+  // budget for this one meal (the TUI is one meal for one person, no people setting).
   if ((m = /人均\s*(?:预算)?\s*(\d+(?:\.\d{1,2})?)/.exec(t)) || (m = /预算\s*(\d+(?:\.\d{1,2})?)/.exec(t))) intent.budgetPerPersonYuan = Number(m[1]);
-  else if ((m = /(?:总共|一共|总预算|合计)\s*(\d+(?:\.\d{1,2})?)/.exec(t))) intent.totalBudgetYuan = Number(m[1]);
+  else if ((m = /(?:总共|一共|总预算|合计)\s*(\d+(?:\.\d{1,2})?)/.exec(t))) intent.budgetPerPersonYuan = Number(m[1]);
   else if ((m = /(\d+(?:\.\d{1,2})?)\s*(?:元|块)/.exec(t))) intent.budgetPerPersonYuan = Number(m[1]);
+  else if (/^\d+(?:\.\d{1,2})?$/.test(t)) intent.budgetPerPersonYuan = Number(t);
   const avoiding = new RegExp(`${NEGATION}|不重样|换(?:个|一)?口味`).test(t);
   if (avoiding && /前两天|这两天|最近两天|前天/.test(t)) intent.avoidRecentDays = 2;
   else if (avoiding && /昨天|昨日/.test(t)) intent.avoidRecentDays = 1;
@@ -135,28 +134,26 @@ export function intentSystemPrompt() {
 你没有任何工具：不能领券、下单、支付、核价或修改价格。不得猜测价格、优惠或门店。
 “就吃这个了”“就这个”“下单”等购买意图由程序在本地识别、并由用户确认门店后才处理，不会交给你，你也不能触发；这类文本不是选餐条件。
 只返回 JSON，键必须恰好为：
-{"people":1,"budgetPerPersonYuan":25,"avoidRecentDays":0,"avoidMainNames":[],"city":null,"keyword":null,"goal":null,"mood":null,"finish":"agent"}
-people：1–4 或 null；budgetPerPersonYuan：人均预算（元），总预算要除以人数，未提及为 null；
+{"budgetPerPersonYuan":25,"avoidRecentDays":0,"avoidMainNames":[],"city":null,"keyword":null,"goal":null,"mood":null,"finish":"agent"}
+budgetPerPersonYuan：这一餐的总预算（元），未提及为 null；
 avoidRecentDays：要避开最近几天吃过的主食，昨天=1，前两天=2，未提及=0；avoidMainNames：用户明确不想吃的主食，只能从输入 mainFoodNames 中原样选择；
 city / keyword：用户明确给出的门店城市与位置关键词（如 深圳 / 华强北），未给出为 null，不要编造；
 goal：balanced（均衡）/ cheapest（省钱）/ variety（换口味）或 null；mood：normal / comfort / surprise / gathering 或 null；finish：用户想用转盘随机揭晓为 wheel，否则 agent。`;
 }
 
 const exactKeys = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
-const INTENT_KEYS = ['people', 'budgetPerPersonYuan', 'avoidRecentDays', 'avoidMainNames', 'city', 'keyword', 'goal', 'mood', 'finish'];
+const INTENT_KEYS = ['budgetPerPersonYuan', 'avoidRecentDays', 'avoidMainNames', 'city', 'keyword', 'goal', 'mood', 'finish'];
 
 export function validateIntent(value, mainNames = new Map()) {
   const fail = () => { throw new Error('意图 Agent 的返回未通过校验'); };
   if (!exactKeys(value, INTENT_KEYS)) fail();
-  const { people, budgetPerPersonYuan: budget, avoidRecentDays, avoidMainNames, city, keyword, goal, mood, finish } = value;
-  if (!(people === null || [1, 2, 3, 4].includes(people))) fail();
+  const { budgetPerPersonYuan: budget, avoidRecentDays, avoidMainNames, city, keyword, goal, mood, finish } = value;
   if (!(budget === null || (typeof budget === 'number' && Number.isFinite(budget) && budget >= 0 && budget <= 1000 && /^\d+(?:\.\d{1,2})?$/.test(String(budget))))) fail();
   if (![0, 1, 2].includes(avoidRecentDays) || !Array.isArray(avoidMainNames) || avoidMainNames.length > 8) fail();
   if (!(goal === null || GOALS.includes(goal)) || !(mood === null || MOODS.includes(mood)) || !['agent', 'wheel'].includes(finish)) fail();
   if (![city, keyword].every((v) => v === null || place(v))) fail();
   const byName = new Map([...mainNames].map(([code, name]) => [name, code]));
   const intent = { avoidRecentDays, finish };
-  if (people !== null) intent.people = people;
   if (budget !== null) intent.budgetPerPersonYuan = budget;
   const codes = avoidMainNames.filter((n) => typeof n === 'string' && byName.has(n)).map((n) => byName.get(n));
   if (codes.length) intent.avoidMainCodes = codes;
@@ -176,11 +173,12 @@ export async function agentIntent(client, text, mainNames, { calendar, signal } 
 export function mergeIntent(local, model = {}, current = {}) {
   const merged = { ...model, ...local }, defaulted = [];
   const pick = (key, value) => { if (value != null) return value; if (current[key] != null) return current[key]; defaulted.push(key); return DEFAULT_INTENT[key]; };
-  const people = pick('people', merged.people);
-  const yuan = pick('budgetPerPersonYuan', local.budgetPerPersonYuan ?? (local.totalBudgetYuan != null ? Math.floor(local.totalBudgetYuan * 100 / people) / 100 : model.budgetPerPersonYuan));
+  // One meal for one person: people is always 1, never asked or shown. The budget is
+  // the total for this meal; budgetPerPersonFen == total because people == 1.
+  const yuan = pick('budgetPerPersonYuan', local.budgetPerPersonYuan ?? model.budgetPerPersonYuan);
   const budgetPerPersonFen = budgetFen(String(yuan));
   return {
-    people, budgetPerPersonFen, defaulted,
+    people: 1, budgetPerPersonFen, defaulted,
     avoidRecentDays: local.avoidRecentDays ?? model.avoidRecentDays ?? 0,
     avoidMainCodes: [...new Set([...(model.avoidMainCodes || []), ...(local.avoidMainCodes || [])])],
     wantMainCodes: (local.wantMainCodes || []).filter((c) => !(model.avoidMainCodes || []).includes(c)),

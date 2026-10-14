@@ -19,21 +19,19 @@ export function alaCarteMains(mainNames, request, templateCodes = new Set()) {
 }
 
 export function alaCartePlan({ code, name }, request, quote, priceLabel) {
-  const people = request.people;
-  return { id: `alacarte-${code}`, kind: 'alacarte', people,
-    title: people > 1 ? `${people}人 · 单点${name} × ${people}` : `单点 · ${name}`, wheelTitle: name, wheelKind: '单点主食',
-    packages: [], parts: [{ code, name, quantity: people }], mainCodes: [code], priceLabel,
+  // One meal for one person: quantity is always 1, and the budget is the total.
+  return { id: `alacarte-${code}`, kind: 'alacarte', people: 1,
+    title: `单点 · ${name}`, wheelTitle: name, wheelKind: '单点主食',
+    packages: [], parts: [{ code, name, quantity: 1 }], mainCodes: [code], priceLabel,
     basePriceFen: quote.basePriceFen, priceFen: quote.priceFen, savingFen: quote.savingFen, couponNames: quote.couponNames || [],
-    ...(quote.quotedAt ? { quotedAt: quote.quotedAt } : {}), ...(quote.orderItems ? { orderItems: quote.orderItems, takeWays: quote.takeWays || [] } : {}), withinBudget: quote.priceFen <= people * request.budgetPerPersonFen };
+    ...(quote.quotedAt ? { quotedAt: quote.quotedAt } : {}), ...(quote.orderItems ? { orderItems: quote.orderItems, takeWays: quote.takeWays || [] } : {}), withinBudget: quote.priceFen <= request.budgetPerPersonFen };
 }
 
 // Demo: menu snapshot prices, no coupons.
 export function demoAlaCarte(menu, mains, request) {
   const prices = new Map((menu?.items || []).map((i) => [i.productCode, fen(i.menuPriceYuan)]));
-  return mains.filter((m) => prices.get(m.code) != null).map((m) => {
-    const total = prices.get(m.code) * request.people;
-    return alaCartePlan(m, request, { basePriceFen: total, priceFen: total, savingFen: 0, couponNames: [] }, '菜单样本价');
-  });
+  return mains.filter((m) => prices.get(m.code) != null).map((m) =>
+    alaCartePlan(m, request, { basePriceFen: prices.get(m.code), priceFen: prices.get(m.code), savingFen: 0, couponNames: [] }, '菜单样本价'));
 }
 
 // Live: one official whole-cart quote per main, with the same held-coupon comparison as set meals.
@@ -41,7 +39,7 @@ export async function liveAlaCarte(client, context, mains, request, coupons, onP
   const common = { storeCode: context.storeCode, orderType: context.orderType, beType: context.beType }, plans = [], failed = [];
   for (const [i, m] of mains.entries()) {
     onProgress({ step: 4, text: `正在核价单点主食（${i + 1} / ${mains.length}）…` });
-    try { plans.push(alaCartePlan(m, request, await quoteBest(client, common, [{ productCode: m.code, quantity: request.people }], coupons), '官方单点核价')); }
+    try { plans.push(alaCartePlan(m, request, await quoteBest(client, common, [{ productCode: m.code, quantity: 1 }], coupons), '官方单点核价')); }
     catch { failed.push({ id: `alacarte-${m.code}`, title: `单点 · ${m.name}`, reason: '单点核价未完成，本次不比价' }); }
   }
   return { plans, failed };
@@ -64,7 +62,7 @@ const extrasOf = (plan, mainCode) => [...new Set((plan.parts || []).filter((p) =
 // UPGRADE_MAX_FEN_PER_PERSON more also wins. Otherwise à la carte stays and cheapest wins.
 export function applyUpgrades(report, mainNames = new Map()) {
   const request = report.request, want = new Set(request.wantMainCodes || []), notes = [], dropped = [];
-  const limit = UPGRADE_MAX_FEN_PER_PERSON * request.people;
+  const limit = UPGRADE_MAX_FEN_PER_PERSON;
   const singles = report.quotedPlans.filter(isAlaCarte);
   const sets = report.candidates.filter((p) => !isAlaCarte(p));
   for (const single of singles) {
@@ -105,5 +103,5 @@ export function upgradeText(u) {
   if (u.deltaFen === 0) return `单点${u.mainName} ${money(u.alaCarteFen)}，同价可得套餐${extras}`;
   const head = `单点${u.mainName} ${money(u.alaCarteFen)}，+${money(u.deltaFen)} 可得套餐${extras}`;
   if (u.chosen === 'set') return head;
-  return u.wanted ? `${head}；超过升级线（每人 +${money(UPGRADE_MAX_FEN_PER_PERSON)}），单点更省` : `${head}；单点更省`;
+  return u.wanted ? `${head}；超过升级线（+${money(UPGRADE_MAX_FEN_PER_PERSON)}），单点更省` : `${head}；单点更省`;
 }
