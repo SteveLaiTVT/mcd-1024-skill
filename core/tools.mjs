@@ -18,7 +18,6 @@ export const TOOLS = Object.freeze([
   schema('calculate_price', '对一组商品核价。只读，不会下单。', {
     storeCode: { type: 'string' },
     items: { type: 'array' },
-    couponIds: { type: 'array' },
   }, ['storeCode', 'items']),
   schema('available_coupons', '查看可领和持有的券。只读，不会领券。', {}, []),
   schema('campaign_calendar', '查看活动日历。只读。', {}, []),

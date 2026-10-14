@@ -259,3 +259,123 @@ test('source checks: no web import, no intent regex, no random receipt', () => {
   const receipt = grep('maybeReceipt|shouldPrintReceipt|随手掉落', 'tui');
   assert.equal(receipt.stdout, '');
 });
+
+test('source checks: build scripts only handle the receipt card, never web/', async () => {
+  const build = await readFile(new URL('../scripts/build_frontend.mjs', import.meta.url), 'utf8');
+  assert(!build.includes('web/'), 'build script must not reference web/');
+  assert(!build.includes('ENOENT'), 'ENOENT must not be swallowed');
+  assert(build.includes('receipt-card.html') && build.includes("'receipt', 'index.html'"));
+});
+
+// Fix #1: auth/balance/rate/network degrade with the real message; only bad JSON says 没理解.
+test('hub: model-side failures degrade with message, bad JSON stays 没理解', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  for (const code of ['auth', 'balance', 'rate', 'network']) {
+    const llm = { async chat() { throw new DeepSeekError(`${code} exploded`, code); } };
+    const out = await decide({ session, text: '来一份', llm, runTool: async () => ({}) });
+    assert.equal(out.kind, 'unknown');
+    assert.equal(out.degraded, 'degraded', code);
+    assert.match(out.errorMessage, new RegExp(code), code);
+  }
+  const badLlm = { async chat() { return { json: { kind: 'nope' }, toolCalls: [], content: '', message: {} }; } };
+  const bad = await decide({ session, text: 'x', llm: badLlm, runTool: async () => ({}) });
+  assert.equal(bad.degraded, 'invalid');
+});
+
+test('executor: degraded hub intent shows the error and falls back to local picks', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => '不是', message: (e) => e.message });
+  await exec.runIntent({ ...intent('unknown'), degraded: 'degraded', errorMessage: '余额不足' }, { query: '来一份' });
+  assert.match(out.text(), /余额不足/);
+  assert.match(out.text(), /本地模式/);
+  assert.match(out.text(), /编号推荐/);
+});
+
+// Fix #2: budget from the model only applies to recommend/blindbox, and only when changed.
+test('budget is ignored for non-pick intents and when unchanged', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => null, message: (e) => e.message });
+  session.lastPick = { id: 'p1', title: '双层吉士汉堡', parts: [{ name: '双层吉士汉堡' }], priceFen: 1490, orderItems: [] };
+  const before = session.request.budgetPerPersonFen;
+  await exec.runIntent(intent('info_meat', { budget_yuan: 50 }), { query: '有牛肉吗' });
+  assert.equal(session.request.budgetPerPersonFen, before, 'info intent must not touch budget');
+  assert.equal(session.lastPick.title, '双层吉士汉堡', 'pick must survive');
+});
+
+// Fix #3: "有什么料" with no code match says 没查到 instead of answering another meal.
+test('info_ingredients never answers with an unrelated cached meal', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  session.lastPick = { id: 'pick-1', title: 'A餐', parts: [], orderItems: [{ productCode: 'CODE-A' }] };
+  session.detailCache = { other: { code: 'CODE-B', name: 'B餐', parts: [], removable: ['生菜'], meatKind: [], complete: false, unknown: false } };
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => null, message: (e) => e.message });
+  exec.infoFromCache('info_ingredients');
+  assert.match(out.text(), /没查到/);
+  assert.doesNotMatch(out.text(), /生菜/);
+});
+
+// Fix #4: prefetch targets candidate product codes, not the menu at large.
+test('prefetchCandidateDetails fetches the candidates own codes', async () => {
+  const { prefetchCandidateDetails } = await import('../core/menu.mjs');
+  const seen = [];
+  const client = { async call(name, args) { seen.push(args.code); return { data: { code: args.code, name: `餐${args.code}` } }; } };
+  const candidates = [
+    { id: 'c1', title: '套餐1', orderItems: [{ productCode: 'P1' }, { productCode: 'P2' }] },
+    { id: 'c2', title: '套餐2', orderItems: [{ productCode: 'P1' }] },
+  ];
+  const cache = await prefetchCandidateDetails(client, {}, candidates);
+  assert.ok(cache.P1 && cache.P2, 'candidate product codes fetched');
+  assert.equal(new Set(seen).size, seen.length, 'no duplicate fetches');
+  assert(!seen.includes('UNRELATED'), 'menu-wide items are not fetched');
+});
+
+// Fix #5: the numbered card renders the coupon value table.
+test('numbered card shows 券折算 rows', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  session.couponTable = [{ name: '测试券', applicable: true, saveYuan: 5, ratio: null, afterYuan: 10, note: '' }];
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => null, message: (e) => e.message });
+  exec.showNumbered([{ id: 't1', title: '测试餐', priceFen: 1500, savingFen: 500, parts: [], couponNames: [] }], { query: 't' });
+  assert.match(out.text(), /券折算/);
+  assert.match(out.text(), /测试券/);
+  assert.match(out.text(), /省 ¥5\.00/);
+});
+
+// Fix #6: an aborted signal cancels the MCP call without retrying.
+test('MCPClient.call with an aborted signal throws 已取消 without retry', async () => {
+  const { MCPClient } = await import('../core/mcp.mjs');
+  let calls = 0;
+  const client = new MCPClient('test-token-12345678', {
+    fetchFn: async () => { calls += 1; await new Promise((r) => setTimeout(r, 5000)); throw new Error('hang'); },
+    timeoutMs: 1000, sleep: async () => {},
+  });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(client.call('query-meals', {}, { signal: controller.signal }), /已取消/);
+  assert.equal(calls, 0, 'no fetch attempt on an already-aborted signal');
+});
+
+// Fix #7: retry uses the failed receipt snapshot, not a later pick.
+test('retry uses the failed order snapshot even after a new pick', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true, llm: createFakeLlm() });
+  const failedReceipt = { title: '旧餐', priceFen: 2000, storeName: '店', parts: [], couponNames: [], at: new Date().toISOString(), sample: true };
+  session.lastOrderAttempt = recordAttempt(null, { status: 'failed', reason: '拒单', receiptSnapshot: failedReceipt });
+  session.lastReceipt = { title: '新餐', priceFen: 1500, storeName: '店', parts: [], couponNames: [], at: new Date().toISOString(), sample: true };
+  session.lastPick = { title: '新餐' };
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => '不是', message: (e) => e.message });
+  await exec.retry();
+  assert.equal(session.lastReceipt.title, '旧餐', 'retry must restore the failed snapshot');
+  assert.match(out.text(), /按上次失败的这一单重试/);
+});
+
+// Fix #9: register_allergy is honest about /allergy being the entry point.
+test('register_allergy points to /allergy', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => null, message: (e) => e.message });
+  await exec.runIntent(intent('register_allergy'), { query: '我花生过敏' });
+  assert.match(out.text(), /\/allergy/);
+});

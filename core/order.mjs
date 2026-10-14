@@ -3,12 +3,12 @@ const MAX_RETRIES = 3;
 
 export function emptyAttempt() { return null; }
 
-export function recordAttempt(prev, { status, reason, cartSnapshot = null, storeCode = null, ambiguous = false } = {}) {
+export function recordAttempt(prev, { status, reason, cartSnapshot = null, receiptSnapshot = null, storeCode = null, ambiguous = false } = {}) {
   const failed = ambiguous ? 'unknown' : status;
   return {
     status: failed === 'success' ? 'success' : failed,
     reason: String(reason || '').slice(0, 200),
-    cartSnapshot, storeCode,
+    cartSnapshot, receiptSnapshot, storeCode,
     ts: Date.now(),
     retries: prev && prev.status !== 'success' ? prev.retries || 0 : 0,
     ambiguous: Boolean(ambiguous),

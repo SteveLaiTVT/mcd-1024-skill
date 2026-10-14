@@ -74,3 +74,32 @@ export async function prefetchDetails(client, common, items, { limit = 8 } = {})
   }));
   return cache;
 }
+
+// Ingredient prefetch for the meals the user actually sees: the ranked candidates'
+// orderItems product codes, cached by code. Replaces menu-wide prefetching, which
+// fetched unrelated items and could answer "有什么料" with the wrong meal.
+export async function prefetchCandidateDetails(client, common, candidates, { limit = 4, signal } = {}) {
+  const cache = {};
+  const seen = new Set();
+  const jobs = [];
+  for (const cand of (candidates || []).slice(0, limit)) {
+    if (!cand) continue;
+    const codes = [...new Set([cand.id, ...(cand.orderItems || []).map((i) => i?.productCode)].filter(Boolean))];
+    for (const code of codes) {
+      if (seen.has(code)) continue;
+      seen.add(code);
+      jobs.push((async () => {
+        try {
+          const data = detailOf((await client.call('query-meal-detail', { ...common, code }, { signal })).data, code);
+          cache[code] = data
+            ? parseDetail(data, { code, name: cand.title })
+            : { code, name: cand.title, parts: [], removable: [], meatKind: meatsInName(cand.title), complete: false, unknown: true };
+        } catch {
+          cache[code] = { code, name: cand.title, parts: [], removable: [], meatKind: meatsInName(cand.title), complete: false, unknown: true };
+        }
+      })());
+    }
+  }
+  await Promise.all(jobs);
+  return cache;
+}

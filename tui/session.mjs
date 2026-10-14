@@ -3,8 +3,7 @@
 // Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
 import { MCPClient, MCPError } from '../core/mcp.mjs';
 import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape, detailOf } from '../core/pricing.mjs';
-import { fallbackPicks, liveMenuPlans, snapshotMenu, matchMenu, quoteMenuItems } from './menu.mjs';
-import { describeDetail, demoDetail, resolveInfoItem } from './info.mjs';
+import { fallbackPicks, liveMenuPlans, snapshotMenu } from './menu.mjs';
 import { readHistory, demoHistory, shiftDay } from '../core/history.mjs';
 import { storeResults } from '../core/store.mjs';
 import { DeepSeekClient, DeepSeekError } from '../core/llm.mjs';
@@ -13,7 +12,7 @@ import { defaultPreferences, learnFeedback } from '../core/pick.mjs';
 import { couponPicture, claimableList, valueCoupons } from '../core/coupons.mjs';
 import { applyGate } from '../core/eligibility.mjs';
 import { reRank, profileSummary, emptyTaste, pushTurn, rememberFeedback, stripAllergyText } from '../core/memory.mjs';
-import { meatsInName, prefetchDetails } from '../core/menu.mjs';
+import { meatsInName, prefetchCandidateDetails } from '../core/menu.mjs';
 import { receiptFrom } from './receipt.mjs';
 import { alaCarteMains, demoAlaCarte, liveAlaCarte, mergeAlaCarte, applyUpgrades } from './pricing.mjs';
 import { applyAllergyFilter, normalizeAllergens, loadProfile, saveProfile } from './allergy.mjs';
@@ -26,7 +25,6 @@ import { buyContext, validBuyContext, baseItems, chooseTakeWay, createOrderArgs,
 export class TuiError extends Error {}
 
 const DEFAULT_BUDGET_YUAN = 25;
-const errText = (e) => e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回');
 
 export class TuiSession {
   #mcdToken; #deepseekKey; #mcp = null; #deepseek = null; #allergies = [];
@@ -260,7 +258,7 @@ export class TuiSession {
     return { orderId, known, ...status };
   }
 
-  async quote(onProgress = () => {}) {
+  async quote(onProgress = () => {}, { signal } = {}) {
     const context = this.requireStore(), request = { ...this.request, avoidMainCodes: [...this.request.avoidMainCodes], wantMainCodes: [...(this.request.wantMainCodes || [])] };
     this.invalidate();
     if (!this.demo) this.benefits = null;
@@ -299,8 +297,10 @@ export class TuiSession {
     for (const p of report.candidates.slice(0, 8)) {
       if (!this.detailCache[p.id]) this.detailCache[p.id] = { code: p.id, name: p.title, parts: (p.parts || []).map((x) => ({ name: x.name, qty: x.quantity })), removable: [], meatKind: meatsInName(`${p.title} ${(p.parts || []).map((x) => x.name).join(' ')}`), complete: false, unknown: false };
     }
-    if (!this.demo && this.#mcp && this.menuSnapshot.length) {
-      try { Object.assign(this.detailCache, await prefetchDetails(this.#mcp, context, this.menuSnapshot)); }
+    // Ingredient prefetch targets the ranked candidates' own product codes, not the
+    // menu at large: the old menu-wide prefetch answered "有什么料" with unrelated meals.
+    if (!this.demo && this.#mcp) {
+      try { Object.assign(this.detailCache, await prefetchCandidateDetails(this.#mcp, context, report.candidates, { signal })); }
       catch { this.dataIncomplete = true; }
     }
     try {
@@ -309,7 +309,7 @@ export class TuiSession {
         this.couponTable = top ? [{ name: top.couponNames?.[0] || '样本券', applicable: (top.savingFen || 0) > 0, saveYuan: (top.savingFen || 0) / 100, ratio: null, afterYuan: (top.priceFen || 0) / 100, note: top.couponNames?.length ? '' : '估算' }] : [];
       } else if (this.#mcp && this.benefits?.usable?.length) {
         const priced = report.candidates.slice(0, 3).map((p) => ({ ...p, items: p.orderItems || p.items || [] })).filter((p) => p.items.length);
-        this.couponTable = await valueCoupons(this.#mcp, context, this.benefits.usable, priced);
+        this.couponTable = await valueCoupons(this.#mcp, context, this.benefits.usable, priced, { signal });
       }
     } catch { this.dataIncomplete = true; }
     if (report.candidates.length && ['empty', 'unavailable'].includes(report.status)) report.status = 'ready';
@@ -327,69 +327,14 @@ export class TuiSession {
     this.menu = { storeCode: context.storeCode, items, shape: menuShape(raw) };
     return items;
   }
-  // '牛肉堡多少钱': menu matches, and live calculate-price on the cheapest few (quantity 1). Never orders, never claims.
-  async priceLookup(item, onProgress = () => {}) {
-    const context = this.requireStore(), items = await this.storeMenu(onProgress), matches = matchMenu(items, item);
-    if (this.demo) return { item, items, matches, quoted: [], failed: [], sample: true };
-    onProgress({ text: `calculate-price（核价 ${Math.min(matches.length, 3)} 样，只读）…` });
-    const { quoted, failed } = matches.length ? await quoteMenuItems(this.requireClient(), context, matches, this.benefits?.usable || []) : { quoted: [], failed: [] };
-    return { item, items, matches, quoted, failed, sample: false };
-  }
-  // Read-only meal detail for an info question. Unlike menuItemCart, a query-meal-detail
-  // failure stays an error so the answer can say the interface failed rather than "this is a single".
-  // The name is the longest exact suffix on this store's menu, then matchMenu.
-  async itemDetail(item, onProgress = () => {}) {
-    const context = this.requireStore(), items = await this.storeMenu(onProgress);
-    const exact = resolveInfoItem(items, item), matches = exact ? [exact] : matchMenu(items, item);
-    const base = { item, items, matches, sample: this.demo };
-    if (!matches.length) return { ...base, detail: null, error: null };
-    if (this.demo) {
-      const raw = demoDetail(this.dataset.packages, matches[0].code, matches[0].name);
-      return { ...base, detail: raw ? describeDetail(raw) : null, error: null };
-    }
-    try {
-      onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
-      const data = (await this.requireClient().call('query-meal-detail', { ...context, code: matches[0].code })).data;
-      const raw = detailOf(data, matches[0].code);
-      if (!raw) return { ...base, detail: null, error: '餐品详情为空' };
-      return { ...base, detail: describeDetail(raw), error: null };
-    } catch (e) {
-      return { ...base, detail: null, error: errText(e) };
-    }
-  }
-  // Read-only details for the picked meal. Uses lastReceipt.buy (store code + product codes),
-  // so a later store switch does not change which meal is described. Demo, or a pick with no
-  // buy context, returns no details — the receipt's part names still answer on their own.
-  // productCode is the priced package (selected choices live in roundList); 〔默认〕 is the catalog isDefault and can differ from receipt.parts.
-  async pickDetail(onProgress = () => {}) {
-    const receipt = this.lastReceipt, buy = receipt?.buy, sourceStore = buy?.storeCode || '';
-    if (this.demo || !buy) return { receipt, details: [], error: null, sourceStore };
-    const client = this.requireClient(), details = [];
-    let error = null;
-    for (const it of buy.items || []) {
-      const code = it?.productCode;
-      if (!code) continue;
-      try {
-        onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
-        const data = (await client.call('query-meal-detail', { storeCode: sourceStore, orderType: 1, beType: 1, code })).data;
-        const raw = detailOf(data, code);
-        if (raw) details.push(describeDetail(raw));
-        else error = error || '餐品详情为空';
-      } catch (e) {
-        error = error || errText(e);
-      }
-    }
-    return { receipt, details, error, sourceStore };
-  }
-
   couponPicture() {
     const claimable = this.demo ? claimableList(this.dataset.offers?.offers, this.dataset.campaigns?.events) : claimableList(this.benefits?.offers, this.benefits?.entries);
     return { ...couponPicture(this.demo ? null : this.benefits, this.wheel.report), claimable };
   }
 
-  async runTool(name, args) {
+  async runTool(name, args, { signal } = {}) {
     if (this.demo) { this.dataIncomplete = true; return { error: '样本模式没有实时接口' }; }
-    const body = await this.requireClient().call(name, args);
+    const body = await this.requireClient().call(name, args, { signal });
     if (name === 'query-meals') {
       const items = [...menuIndex(body.data).values()];
       this.menu = { storeCode: args.storeCode, items, shape: menuShape(body.data) };

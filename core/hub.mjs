@@ -78,8 +78,17 @@ export async function decide({ session, text, llm, signal, runTool, maxToolRound
     }
   } catch (error) {
     if (error instanceof DeepSeekError && error.code === 'cancelled') throw error;
-    const timeout = error instanceof DeepSeekError && error.code === 'timeout';
-    return { ...unknownIntent(timeout ? 'timeout' : 'invalid'), calls };
+    if (error instanceof DeepSeekError) {
+      // Auth/balance/rate/network problems are the model's problem, not the user's phrasing:
+      // surface the real message and let the executor fall back to local numbered picks.
+      // Only a JSON validation failure means "didn't understand".
+      if (['auth', 'balance', 'rate', 'network'].includes(error.code)) {
+        return { ...unknownIntent('degraded'), calls, errorMessage: error.message };
+      }
+      const timeout = error.code === 'timeout';
+      return { ...unknownIntent(timeout ? 'timeout' : 'invalid'), calls };
+    }
+    return { ...unknownIntent('invalid'), calls };
   }
   return { ...unknownIntent('invalid'), calls };
 }

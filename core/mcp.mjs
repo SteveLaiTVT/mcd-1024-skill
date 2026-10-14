@@ -68,14 +68,19 @@ export class MCPClient {
     for (const c of this.#controllers) c.abort();
     this.#controllers.clear();
   }
-  async #rpc(method, params, { notification = false, retrySafe = true } = {}) {
+  async #rpc(method, params, { notification = false, retrySafe = true, signal = null } = {}) {
     if (this.#closed) throw new MCPError('连接已关闭，请重新填写 Token。');
+    if (signal?.aborted) throw new MCPError('已取消。');
     const payload = { jsonrpc: '2.0', method, params };
     if (!notification) payload.id = ++this.#id;
     const attempts = retrySafe ? 3 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
       if (this.#closed) throw new MCPError('连接已关闭。');
+      if (signal?.aborted) throw new MCPError('已取消。');
       const controller = new AbortController(); this.#controllers.add(controller);
+      // The caller's signal only cancels: it never changes retry semantics for real failures.
+      const onExternalAbort = () => controller.abort();
+      signal?.addEventListener('abort', onExternalAbort, { once: true });
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       let retry = false;
       try {
@@ -97,10 +102,12 @@ export class MCPClient {
         }
       } catch (error) {
         if (error instanceof MCPError) throw error;
+        // External cancellation is not a transport failure: never retry it, never relabel it.
+        if (signal?.aborted) throw new MCPError('已取消。');
         retry = retrySafe && !this.#closed && attempt < attempts - 1;
         if (!retry) throw new MCPError(this.#closed ? '连接已关闭。' : '无法直连麦当劳。请检查网络。', { ambiguous: !retrySafe });
       } finally {
-        clearTimeout(timer); this.#controllers.delete(controller);
+        clearTimeout(timer); signal?.removeEventListener('abort', onExternalAbort); this.#controllers.delete(controller);
       }
       if (retry) await this.sleep((attempt + 1) * 700);
     }
@@ -115,9 +122,9 @@ export class MCPClient {
     await this.#rpc('notifications/initialized', {}, { notification: true });
     return this;
   }
-  async call(name, args = {}) {
+  async call(name, args = {}, { signal } = {}) {
     if (!READ_TOOLS.has(name)) throw new MCPError('终端不支持该操作。');
-    return businessResponse(await this.#rpc('tools/call', { name, arguments: args }));
+    return businessResponse(await this.#rpc('tools/call', { name, arguments: args }, { signal }));
   }
   async claimAll() {
     // Only called after the explicitly labelled user action. Never retry this write.

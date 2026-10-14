@@ -5,6 +5,7 @@ import { rankCandidates, blindboxPick, factReason } from '../core/pick.mjs';
 import { RETRY_PHRASE, canRetry, classifyFailure, recordAttempt } from '../core/order.mjs';
 import { allOut } from '../core/eligibility.mjs';
 import { meatsInName } from '../core/menu.mjs';
+import { renderCouponTable } from '../core/coupons.mjs';
 import { stripAllergyText } from '../core/memory.mjs';
 import { answerMeat, answerParts, answerIngredients, renderInfoAnswer } from './info.mjs';
 import { isStoreConfirm, renderBuySummary, renderPayment,
@@ -20,19 +21,26 @@ export function couponPriceLine(plan) {
   return `券后 ¥${after}（省 ¥${save}）`;
 }
 
+// The receipt at order time, frozen: a later recommendation must not change what "重试" retries.
+const snapshotReceipt = (receipt) => {
+  if (!receipt) return null;
+  try { return structuredClone(receipt); } catch { return { ...receipt }; }
+};
+
 export function createExecutor({ session, ui, ask, message }) {
   const P = ui.palette;
 
-  function showNumbered(plans, { local = false, blindbox = false, skips = [], query = '' } = {}) {
+  function showNumbered(plans, { local = false, localNote = '', blindbox = false, skips = [], query = '' } = {}) {
     if (!plans.length) {
       ui.panel('没有能点的餐', [skips.map((s) => s.line).filter(Boolean).join('\n') || allOut(skips.length), P.gray('换家店或调预算试试。')], 'yellow');
       session.lastDetails = { query, lines: skips.map((s) => s.line) };
       return;
     }
     session.ranked = plans;
+    session.lastOrderAttempt = null; // A new recommendation supersedes any failed order attempt.
     session.recordPick(plans[0]);
     const lines = [];
-    if (local) lines.push(P.yellow('本地模式：没有 DeepSeek key，按券后价编号。资格门和确认门仍然在。'));
+    if (local) lines.push(P.yellow(localNote || '本地模式：没有 DeepSeek key，按券后价编号。资格门和确认门仍然在。'));
     if (blindbox) lines.push(P.bold('盲盒'));
     plans.forEach((plan, i) => {
       const reason = factReason(plan, { rank: i + 1, taste: session.taste, cheaper: i === 0 ? 0 : 1 });
@@ -41,23 +49,36 @@ export function createExecutor({ session, ui, ask, message }) {
       lines.push(P.gray(`  ${(plan.parts || []).map((p) => p.name).join('、')}`));
     });
     for (const s of skips) if (s.line) lines.push(P.gray(s.line));
+    if (session.couponTable?.length) {
+      lines.push(P.bold('券折算'));
+      for (const row of renderCouponTable(session.couponTable)) lines.push(P.gray(`  ${row}`));
+    }
     lines.push(P.gray(`门店：${session.store?.storeName || '未选门店'} · /why 看挑选过程`));
     ui.result(blindbox ? '盲盒' : '编号推荐', lines);
     session.lastDetails = { query, lines };
   }
 
-  async function ensureQuoted() {
+  async function ensureQuoted(signal) {
     if (session.report?.candidates?.length && session.fresh()) return session.report;
     if (!session.store && session.demo) return null;
-    return session.quote((p) => p?.text && ui.write(P.gray(p.text)));
+    return session.quote((p) => p?.text && ui.write(P.gray(p.text)), { signal });
   }
 
-  async function recommend({ local = false, query = '', budget } = {}) {
-    if (budget != null && Number.isFinite(budget)) session.setProfile({ budgetPerPersonFen: Math.round(budget * 100) });
+  // Budget from the model only ever applies to (re)picking, and only when it actually
+  // changes: an unchanged budget must not invalidate the wheel and wipe the pick,
+  // or the buy preview loses its context ("缺少下单所需信息").
+  function applyBudget(budget) {
+    if (budget == null || !Number.isFinite(budget)) return;
+    const fen = Math.round(budget * 100);
+    if (fen !== session.request.budgetPerPersonFen) session.setProfile({ budgetPerPersonFen: fen });
+  }
+
+  async function recommend({ local = false, query = '', budget, signal, localNote = '' } = {}) {
+    applyBudget(budget);
     const step = ui.begin(local ? '本地编号（按券后价）' : '为你挑选这一餐');
     try {
       step.progress('核价候选…');
-      const report = await ensureQuoted();
+      const report = await ensureQuoted(signal);
       step.done();
       const pool = report?.candidates || [];
       const { ranked, skipped, emptyLine } = rankCandidates(pool, { taste: session.taste, budgetFen: session.request.budgetPerPersonFen });
@@ -66,7 +87,7 @@ export function createExecutor({ session, ui, ask, message }) {
         session.lastDetails = { query, lines: [emptyLine, ...skipped.map((s) => s.line)] };
         return;
       }
-      showNumbered(ranked, { local, skips: [...(report?.eligibilitySkipped || []), ...skipped], query });
+      showNumbered(ranked, { local, localNote, skips: [...(report?.eligibilitySkipped || []), ...skipped], query });
     } catch (e) { step.fail(message(e)); }
   }
 
@@ -80,7 +101,10 @@ export function createExecutor({ session, ui, ask, message }) {
   function infoFromCache(kind, { meat = '牛肉' } = {}) {
     const pick = session.lastPick;
     const cache = Object.values(session.detailCache || {});
-    const cached = cache.find((d) => d.name === pick?.title) || cache[0] || null;
+    // Match the picked meal by code, never by loose name, and never fall back to
+    // an unrelated cached entry: answering "有什么料" with another meal's data is worse than saying so.
+    const codes = new Set([pick?.id, ...(pick?.orderItems || []).map((i) => i?.productCode)].filter(Boolean));
+    const cached = pick ? cache.find((d) => d && codes.has(d.code)) || null : null;
     const names = [...(pick?.parts || []).map((p) => p.name), ...(cached?.parts || []).map((p) => p.name), pick?.title].filter(Boolean);
     if (!pick && !cached) return ui.info('没查到。这轮上下文里没有这份餐的配料。');
     if (kind === 'info_meat') {
@@ -93,7 +117,8 @@ export function createExecutor({ session, ui, ask, message }) {
       ui.panel('组成', renderInfoAnswer(answer, P, { storeName: session.store?.storeName || '' }));
       return;
     }
-    const answer = answerIngredients({ name: pick?.title || cached?.name || '', detail: cached ? { name: cached.name, extras: cached.removable || [], rounds: [] } : null, parts: pick?.parts || [], names });
+    if (!cached) return ui.info(`没查到「${pick?.title || ''}」的配料：接口没有返回这份餐的详情，不编。`);
+    const answer = answerIngredients({ name: pick?.title || cached?.name || '', detail: { name: cached.name, extras: cached.removable || [], rounds: [] }, parts: pick?.parts || [], names });
     const lines = renderInfoAnswer(answer, P);
     if (!cached?.complete) lines.push(P.gray('不是完整配料表：接口只给了可去掉的料和组成，没有完整配料表。'));
     if (cached?.unknown) lines.unshift('配料未知');
@@ -113,7 +138,7 @@ export function createExecutor({ session, ui, ask, message }) {
     if (preview.demo && process.env.MCD_TEST_ORDER_FAIL === '1') {
       const classified = classifyFailure(new Error('测试拒单'));
       const prev = session.lastOrderAttempt;
-      const attempt = recordAttempt(prev, { ...classified, storeCode: session.store?.storeCode || null, cartSnapshot: preview.receipt?.title });
+      const attempt = recordAttempt(prev, { ...classified, storeCode: session.store?.storeCode || null, cartSnapshot: preview.receipt?.title, receiptSnapshot: snapshotReceipt(preview.receipt) });
       if (retrying && classified.status === 'failed' && !classified.ambiguous && !classified.duplicate) attempt.retries = (prev?.retries || 0) + 1;
       session.lastOrderAttempt = attempt;
       return ui.error('测试拒单 没下单。可以说「重试」。');
@@ -143,7 +168,7 @@ export function createExecutor({ session, ui, ask, message }) {
     } catch (e) {
       const classified = classifyFailure(e);
       const prev = session.lastOrderAttempt;
-      const attempt = recordAttempt(prev, { ...classified, storeCode: preview.context?.storeCode, cartSnapshot: preview.receipt?.title });
+      const attempt = recordAttempt(prev, { ...classified, storeCode: preview.context?.storeCode, cartSnapshot: preview.receipt?.title, receiptSnapshot: snapshotReceipt(preview.receipt) });
       if (retrying && classified.status === 'failed' && !classified.ambiguous && !classified.duplicate) attempt.retries = (prev?.retries || 0) + 1;
       session.lastOrderAttempt = attempt;
       const extra = classified.ambiguous || classified.status === 'unknown'
@@ -156,21 +181,29 @@ export function createExecutor({ session, ui, ask, message }) {
   async function retry() {
     const gate = canRetry(session.lastOrderAttempt);
     if (!gate.ok) return ui.info(gate.message);
-    if (!session.lastReceipt) return ui.info(BUY_NO_PICK);
+    // Retry the failed order's own snapshot, not whatever the user picked afterwards.
+    const snapshot = session.lastOrderAttempt.receiptSnapshot || session.lastReceipt;
+    if (!snapshot) return ui.info(BUY_NO_PICK);
     ui.info('按上次失败的这一单重试，不会重新选餐。');
+    session.lastReceipt = snapshot;
     return runBuyFlow({ retrying: true });
   }
 
-  async function runIntent(intent, { query = '' } = {}) {
-    if (intent?.slots?.budget_yuan != null) session.setProfile({ budgetPerPersonFen: Math.round(intent.slots.budget_yuan * 100) });
+  async function runIntent(intent, { query = '', signal } = {}) {
     if (intent?.degraded === 'timeout') {
       ui.panel('这轮超时', ['按本地规则没能问完模型。资格门和确认门没有跳过。', '可以说得再具体一点，或直接说 1、2、3。'], 'yellow');
       return;
     }
+    if (intent?.degraded === 'degraded') {
+      // Auth/balance/rate/network: the model's problem, not the user's phrasing.
+      // Say what actually happened, then fall back to local numbered picks.
+      return recommend({ local: true, query, signal, localNote: `${intent.errorMessage || '模型暂不可用'}（本地模式）` });
+    }
     switch (intent?.kind) {
-      case 'recommend': return recommend({ query, budget: intent.slots?.budget_yuan });
+      case 'recommend': return recommend({ query, budget: intent.slots?.budget_yuan, signal });
       case 'blindbox': {
-        await ensureQuoted();
+        applyBudget(intent.slots?.budget_yuan);
+        await ensureQuoted(signal);
         const drawn = blindboxPick(session.report?.candidates || [], { taste: session.taste, budgetFen: session.request.budgetPerPersonFen, random: session.random });
         if (!drawn.plan) return ui.panel('没有能点的餐', [drawn.emptyLine], 'yellow');
         showNumbered([drawn.plan], { blindbox: true, skips: drawn.skipped, query });
@@ -191,7 +224,7 @@ export function createExecutor({ session, ui, ask, message }) {
         if (!plan) return ui.info('不知道，这轮还没有核过价。');
         return ui.info(`${plan.title} ${couponPriceLine(plan)}`);
       }
-      case 'register_allergy': return ui.info('忌口只记在本机，不会发给模型和麦当劳。');
+      case 'register_allergy': return ui.info('要记录过敏请用 /allergy 加名称，例如 /allergy 花生。忌口只记在本机。');
       case 'chitchat': return ui.info(intent.answer || '你好。说预算或直接说 1、2、3 就行。');
       case 'help': return ui.info(intent.answer || '说一句话选餐，或者说 1、2、3。下单前会问是这家店吗。');
       default: return ui.info('没理解，能再说一遍吗');
@@ -211,15 +244,15 @@ export function createExecutor({ session, ui, ask, message }) {
     }
     if (RETRY_PHRASE.test(stripped) && session.lastOrderAttempt && session.lastOrderAttempt.status !== 'success') return retry();
     const llm = session.llmClient;
-    if (!llm) return recommend({ local: true, query: stripped });
+    if (!llm) return recommend({ local: true, query: stripped, signal });
     const step = ui.begin('理解这句话');
     let intent;
     try {
       step.progress('问模型…');
-      intent = await decide({ session, text: stripped, llm, signal, runTool: (name, args) => session.runTool(name, args) });
+      intent = await decide({ session, text: stripped, llm, signal, runTool: (name, args, opts) => session.runTool(name, args, opts) });
       step.done();
     } catch (e) { step.fail(message(e)); return; }
-    return runIntent(intent, { query: stripped });
+    return runIntent(intent, { query: stripped, signal });
   }
 
   return { handleText, runIntent, runBuyFlow, retry, recommend, infoFromCache, showNumbered };

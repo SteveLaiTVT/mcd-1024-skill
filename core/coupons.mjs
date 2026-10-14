@@ -58,7 +58,7 @@ function applyCoupon(items, coupon) {
 }
 
 // coupons × candidates(≤3) × 2 calculate-price calls, in parallel. A failed coupon is "价值未知".
-export async function valueCoupons(client, common, coupons, candidates) {
+export async function valueCoupons(client, common, coupons, candidates, { signal } = {}) {
   const list = (coupons || []).slice(0, 8);
   const picks = (candidates || []).filter((c) => Array.isArray(c.items) || Array.isArray(c.orderItems)).slice(0, 3);
   const rows = await Promise.all(list.map(async (coupon) => {
@@ -74,8 +74,8 @@ export async function valueCoupons(client, common, coupons, candidates) {
       if (!withItems) return;
       try {
         const [bare, priced] = await Promise.all([
-          client.call('calculate-price', { ...common, items: bareItems }),
-          client.call('calculate-price', { ...common, items: withItems }),
+          client.call('calculate-price', { ...common, items: bareItems }, { signal }),
+          client.call('calculate-price', { ...common, items: withItems }, { signal }),
         ]);
         const base = bare.data?.price, after = priced.data?.price;
         if (!Number.isSafeInteger(base) || !Number.isSafeInteger(after)) { failed = true; return; }
