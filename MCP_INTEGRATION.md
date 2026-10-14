@@ -2,6 +2,8 @@
 
 官方地址为 `https://mcp.mcd.cn`，Streamable HTTP、Bearer Token。当前前端原型使用 [web/mcp-client.mjs](web/mcp-client.mjs)：用户在本地扩展应用页输入自己的凭证，直接发送给官方；不经过开发者业务服务器。
 
+终端版（`npm run tui`，见 README）复用同一客户端与允许列表，Token 只从进程环境变量 `MCD_TOKEN` 读取，不询问、不显示、不写文件；Agent 模式只调用只读工具，领券仍需 `/claim` 后输入 `yes` 确认。`/activity` 只读 `campaign-calendar` 与 `available-coupons`：MCP 没有报名活动的工具，唯一可经 MCP 完成的参与方式是领对应的可领券。过敏记录只保存在本机 `~/.config/mcd-tui/profile.json`，不会出现在任何 MCP 或 DeepSeek 请求中。
+
 [mcp-config.example.json](mcp-config.example.json)保留 `${MCD_TOKEN}` 环境变量占位符，供支持展开占位符的 MCP 宿主使用。Python 研究脚本读取进程环境；扩展不读取它，也不把 Token 写入配置文件。真实 WorkBuddy 调研、初始化与发布配套记录见 [workbuddy.md](workbuddy.md)，专项奖励以活动审核为准。
 
 ## 工具与用途

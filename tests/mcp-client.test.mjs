@@ -73,6 +73,27 @@ test('authentication failures are distinguishable from transient networking with
   assert.throws(() => businessResponse({ structuredContent: { code: 401, message: fakeToken } }), (error) => error.status === 401 && !error.message.includes(fakeToken));
 });
 
+test('create-order is its own never-retried method: exact arguments, the official refusal message without the token, ambiguous on transport failure', async () => {
+  const sent = [];
+  const ok = new MCPClient(fakeToken, { fetchFn: async (_, options) => { const payload = JSON.parse(options.body); sent.push(payload.params); return reply(payload, { structuredContent: { success: true, data: { orderId: 'O1', payH5Url: 'https://pay.example/x' } } }); } });
+  const args = { storeCode: 'S1', orderType: 1, beType: 1, takeWayCode: 'T1', items: [{ productCode: 'P', quantity: 1 }] };
+  assert.equal((await ok.createOrder(args)).data.payH5Url, 'https://pay.example/x');
+  assert.deepEqual(sent, [{ name: 'create-order', arguments: args }]); ok.close();
+
+  const refused = new MCPClient(fakeToken, { fetchFn: async (_, options) => reply(JSON.parse(options.body), { structuredContent: { success: false, code: 500, message: `门店已打烊 ${fakeToken}` } }) });
+  await assert.rejects(() => refused.createOrder(args), (e) => e instanceof MCPError && !e.ambiguous && /麦当劳未创建订单：门店已打烊/.test(e.message) && !e.message.includes(fakeToken)); refused.close();
+
+  let attempts = 0;
+  const flaky = new MCPClient(fakeToken, { sleep: async () => {}, fetchFn: async (_, options) => { attempts++; return reply(JSON.parse(options.body), {}, 503); } });
+  await assert.rejects(() => flaky.createOrder(args), (e) => e.ambiguous && /未确认/.test(e.message));
+  assert.equal(attempts, 1, 'a write is sent exactly once'); flaky.close();
+
+  let name; const reader = new MCPClient(fakeToken, { fetchFn: async (_, options) => { const payload = JSON.parse(options.body); name = payload.params.name; return reply(payload, { structuredContent: { code: 200, data: { orderStatus: '1' } } }); } });
+  assert.equal((await reader.call('query-order', { orderId: 'O1' })).data.orderStatus, '1'); assert.equal(name, 'query-order');
+  for (const tool of ['create-order', 'cancel-order', 'mall-create-order', 'party-order-create']) await assert.rejects(() => reader.call(tool), /不支持/);
+  reader.close();
+});
+
 test('address reading is permitted while address creation remains outside the read-only API', async () => {
   let name;
   const client = new MCPClient(fakeToken, { fetchFn: async (_, options) => { const payload = JSON.parse(options.body); name = payload.params.name; return reply(payload, { structuredContent: { code: 200, data: { addresses: [] } } }); } });

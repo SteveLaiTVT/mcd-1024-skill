@@ -15,6 +15,18 @@ node_modules/
 *.token
 secrets/
 credentials/
+# MCP 宿主本地配置可能含展开后的真实 Token；仓库只保留 mcp-config.example.json
+.mcp.json
+mcp-config.json
+mcp-config.local.json
+# 终端版过敏记录（健康数据）：默认在 ~/.config/mcd-tui/profile.json，任何拷贝都不得提交
+.config/mcd-tui/
+mcd-tui/
+profile.json
+*.profile.json
+# 终端版本地提交与购物车（/commit /push /cart）：默认在 ~/.config/mcd-tui/orders.json，只是本地清单，不得提交
+orders.json
+*.orders.json
 
 # 本地数据与产物
 data/local/

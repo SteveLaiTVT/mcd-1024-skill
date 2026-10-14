@@ -247,6 +247,9 @@ export function couponVariants(items, coupons, limit = 64) {
   }
   return { variants, truncated };
 }
+// calculate-price data.takeWayList → [{ code, title }]; entries without a string code are dropped.
+export const takeWaysOf = (data) => (Array.isArray(data?.takeWayList) ? data.takeWayList : [])
+  .filter((t) => t && typeof t.code === 'string' && t.code).map((t) => ({ code: t.code, title: typeof t.title === 'string' ? t.title : '' }));
 export async function quoteBest(client, common, items, coupons, limit = 64) {
   const { variants, truncated } = couponVariants(items, coupons, limit);
   const baseline = await client.call('calculate-price', { ...common, items: variants[0] });
@@ -265,6 +268,8 @@ export async function quoteBest(client, common, items, coupons, limit = 64) {
     originalPriceFen: amount(best.data.originalPrice) && best.data.originalPrice >= best.data.price ? best.data.originalPrice : null,
     officialDiscountFen: amount(best.data.discount) ? best.data.discount : null,
     couponNames: bestCart.filter((i) => i.couponId).map((i) => names.get(i.couponId)), quotedAt: best.datetime,
+    // The exact priced items (roundList, modification, couponId/couponCode) and pickup options, kept for create-order.
+    orderItems: clone(bestCart), takeWays: takeWaysOf(best.data),
     successfulCouponQuotes: successes, failedCouponQuotes: failures, variantLimitReached: truncated, comparisonComplete: !truncated && !failures };
 }
 async function mapLimited(values, fn, limit = 2) {
@@ -274,39 +279,116 @@ async function mapLimited(values, fn, limit = 2) {
   })); return result;
 }
 export function validateRequest(request) {
-  requireValue([1, 2, 3, 4].includes(request.people) && [5, 7, 9].includes(request.portion), '请选择人数和食量。');
+  requireValue([1, 2, 3, 4].includes(request.people), '请选择人数。');
+  requireValue(request.portion == null || [5, 7, 9].includes(request.portion), '食量请选 5、7 或 9。');
   requireValue(amount(request.budgetPerPersonFen) && Number.isSafeInteger(request.people * request.budgetPerPersonFen), '预算金额无效。');
   requireValue(Array.isArray(request.avoidMainCodes) && request.avoidMainCodes.every((c) => typeof c === 'string'), '最近吃过的主食无效。');
 }
-export async function prepareWheel(client, templates, context, request, onProgress = () => {}) {
+// query-meals data → Map code → { code, name, priceFen, category }. The documented shape is `meals` keyed by
+// code plus `categories[].meals[]` ({ code, tags }); arrays, numeric codes and bare code strings are read too,
+// so a store whose response differs in shape still yields its real menu.
+const yuanToFen = (v) => { const t = String(v ?? '').trim(); return /^\d+(?:\.\d{1,2})?$/.test(t) ? budgetFen(t) : null; };
+const codeOf = (v) => typeof v === 'number' && Number.isSafeInteger(v) ? String(v) : typeof v === 'string' && v.trim() ? v.trim() : null;
+export function menuIndex(menu) {
+  const index = new Map();
+  const add = (rawCode, meal, category = '') => {
+    const code = codeOf(rawCode); if (!code) return;
+    const m = meal && typeof meal === 'object' ? meal : {}, prev = index.get(code) || { code, name: '', priceFen: null, category: '' };
+    index.set(code, { code, name: prev.name || (typeof m.name === 'string' ? m.name.trim() : ''),
+      priceFen: prev.priceFen ?? yuanToFen(m.currentPrice ?? m.price), category: prev.category || category });
+  };
+  const meals = menu?.meals;
+  if (Array.isArray(meals)) for (const m of meals) add(m && typeof m === 'object' ? m.code ?? m.productCode : m, m);
+  else if (meals && typeof meals === 'object') for (const [code, m] of Object.entries(meals)) add(code, m);
+  for (const c of Array.isArray(menu?.categories) ? menu.categories : []) {
+    for (const m of Array.isArray(c?.meals) ? c.meals : []) add(m && typeof m === 'object' ? m.code ?? m.productCode : m, m, typeof c.name === 'string' ? c.name : '');
+  }
+  return index;
+}
+// One line for /why: what query-meals actually returned.
+export function menuShape(menu) {
+  const meals = menu?.meals, cats = Array.isArray(menu?.categories) ? menu.categories : null;
+  const m = Array.isArray(meals) ? `数组 ${meals.length} 项` : meals && typeof meals === 'object' ? `按编码的对象 ${Object.keys(meals).length} 项` : '缺失';
+  return `meals：${m}；categories：${cats ? `${cats.length} 类` : '缺失'}`;
+}
+const normName = (s) => String(s || '').normalize('NFKC').replace(/[\s™®·()（）]/g, '');
+// A template code missing from this store's menu maps to the store's own code when exactly one menu item has the same name.
+export function resolveCode(code, index, names = new Map()) {
+  if (index.has(code)) return { code, how: 'menu' };
+  const name = normName(names.get(code));
+  const hits = name ? [...index.values()].filter((m) => normName(m.name) === name) : [];
+  return hits.length === 1 ? { code: hits[0].code, how: 'name' } : { code, how: 'absent' };
+}
+// query-meal-detail data → the package detail, with its code as a string (some responses wrap it or send numbers).
+export function detailOf(data, code) {
+  const d = data && typeof data === 'object' && !Array.isArray(data.rounds) && data.meal && typeof data.meal === 'object' ? data.meal : data;
+  if (!d || typeof d !== 'object') return null;
+  return { ...d, code: codeOf(d.code) ?? code };
+}
+// A whole-cart item for any menu product: a package with rounds takes its default choices; anything else is a plain item.
+export async function menuItemCart(client, common, code, quantity, name = '') {
+  let detail = null;
+  try { detail = detailOf((await client.call('query-meal-detail', { ...common, code })).data, code); } catch { /* priced as a plain item */ }
+  if (detail?.rounds?.length) {
+    const [item, parts] = buildPackage(detail, { productCode: code, quantity, choices: {} });
+    return { items: [item], parts, name: detail.name || name };
+  }
+  return { items: [{ productCode: code, quantity }], parts: [{ code, name: detail?.name || name || code, quantity }], name: detail?.name || name };
+}
+// Why a template could not be built at this store. cause: 'menu' (the store does not list it), 'api' (a call failed), 'structure'.
+function templateFailure(recipe, codeStatus, names, error) {
+  const bad = recipe.ingredients.map((i) => ({ code: i.productCode, ...codeStatus.get(i.productCode) })).find((s) => s.detail !== 'ok');
+  const label = (s) => `「${names.get(s.code) || s.code}」`;
+  if (bad?.how === 'absent' && bad.menuOk) return { cause: 'menu', reason: `这家店的菜单（query-meals）里没有${label(bad)}${bad.detail === 'error' ? '，套餐详情也查不到' : ''}` };
+  if (bad?.detail === 'error') return { cause: 'api', reason: `${label(bad)}的套餐详情接口（query-meal-detail）出错：${bad.error}` };
+  if (bad) return { cause: 'menu', reason: `${label(bad)}的套餐详情为空` };
+  return { cause: 'structure', reason: `套餐搭配和模板不一致：${error?.message || '结构不符'}` };
+}
+
+export async function prepareWheel(client, templates, context, request, onProgress = () => {}, { names = new Map() } = {}) {
   validateRequest(request); requireValue(context.storeCode && context.beType === 1 && context.orderType === 1, '请先选择到店取餐门店。');
-  const recipes = templates.recipes.filter((r) => r.people === request.people && r.portion === request.portion);
-  requireValue(recipes.length, '暂时没有此人数和食量的餐单。');
+  const recipes = templates.recipes.filter((r) => r.people === request.people && (request.portion == null || r.portion === request.portion));
+  requireValue(recipes.length, request.portion == null ? '暂时没有此人数的餐单。' : '暂时没有此人数和食量的餐单。');
   const benefits = await inspectBenefits(client, context, onProgress), common = pick(context, ['storeCode', 'orderType', 'beType']);
   onProgress({ step: 2, text: '正在读取当前门店的套餐和搭配…', benefits });
-  const menu = (await client.call('query-meals', common)).data;
-  requireValue(menu && menu.meals && typeof menu.meals === 'object', '门店菜单未确认');
-  const codes = [...new Set(recipes.flatMap((r) => r.ingredients.map((i) => i.productCode)))], details = {};
+  // A failed or odd menu read no longer aborts: every template still tries query-meal-detail, and each failure says why.
+  let rawMenu = null, menuError = '';
+  try { rawMenu = (await client.call('query-meals', common)).data; } catch (e) { menuError = e?.message || '门店菜单未返回'; }
+  const index = menuIndex(rawMenu), menuOk = !menuError && index.size > 0;
+  if (!menuError && !index.size) menuError = `门店菜单为空或无法识别（${menuShape(rawMenu)}）`;
+  const codes = [...new Set(recipes.flatMap((r) => r.ingredients.map((i) => i.productCode)))], details = {}, codeStatus = new Map();
   await mapLimited(codes, async (code) => {
-    if (!(code in menu.meals)) return;
-    try { details[code] = (await client.call('query-meal-detail', { ...common, code })).data; } catch { /* excludes unavailable template */ }
+    const { code: storeCode, how } = resolveCode(code, index, names), status = { storeCode, how, menuOk, detail: 'empty' };
+    codeStatus.set(code, status);
+    try {
+      const detail = detailOf((await client.call('query-meal-detail', { ...common, code: storeCode })).data, storeCode);
+      if (detail?.rounds?.length) { details[code] = detail; status.detail = 'ok'; }
+    } catch (e) { status.detail = 'error'; status.error = e?.message || '未返回'; }
   });
   const mainCodes = new Set(templates.mainProductCodes), avoid = new Set(request.avoidMainCodes), failed = [], excluded = [], ready = [];
   for (const recipe of recipes) {
     try {
-      const cart = buildCart(recipe, details, mainCodes);
+      // Name-matched codes: the cart uses this store's own package code.
+      const local = { ...recipe, ingredients: recipe.ingredients.map((i) => ({ ...i, productCode: codeStatus.get(i.productCode)?.storeCode || i.productCode })) };
+      const localDetails = Object.fromEntries(Object.entries(details).map(([code, d]) => [codeStatus.get(code).storeCode, d]));
+      const cart = buildCart(local, localDetails, mainCodes);
       if (cart.mainCodes.some((c) => avoid.has(c))) { excluded.push({ id: recipe.id, title: recipe.title, reason: '避开最近吃过的主食' }); continue; }
       ready.push({ recipe, cart });
-    } catch { failed.push({ id: recipe.id, title: recipe.title, reason: '当前门店套餐或搭配不可用' }); }
+    } catch (e) { failed.push({ id: recipe.id, title: recipe.title, ...templateFailure(recipe, codeStatus, names, e) }); }
   }
   let done = 0;
   onProgress({ step: 3, text: `正在比较整单价格（0 / ${ready.length}）…`, benefits });
   const results = await mapLimited(ready, async ({ recipe, cart }) => {
     try {
       const quote = await quoteBest(client, common, cart.items, benefits.usable);
-      return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote,
+      // The report must not carry account-private coupon identifiers (couponId/couponCode):
+      // orderItems are for create-order, and the buy flow re-prices (quoteBest directly)
+      // to get fresh ones with coupons before ordering. Strip them here; the plan keeps
+      // productCode / quantity / modification / roundList, which is all buyContext needs.
+      const orderItems = (quote.orderItems || []).map(({ couponId, couponCode, ...rest }) => ({ ...rest }));
+      return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote, orderItems,
         packages: cart.packages, parts: cart.parts, mainCodes: cart.mainCodes, withinBudget: quote.priceFen <= request.people * request.budgetPerPersonFen };
-    } catch { return { id: recipe.id, title: recipe.title, reason: '整单核价失败，本次不入盘' }; }
+    } catch (e) { return { id: recipe.id, title: recipe.title, cause: 'api', reason: `整单核价（calculate-price）失败：${e?.message || '未返回'}` }; }
     finally { done++; onProgress({ step: 3, text: `正在比较整单价格（${done} / ${ready.length}）…`, benefits }); }
   });
   const quoted = results.filter((r) => 'priceFen' in r).sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
@@ -323,12 +405,15 @@ export async function prepareWheel(client, templates, context, request, onProgre
     priceComparisonComplete: complete, minimumVerifiedPriceFen: quoted[0]?.priceFen ?? null,
     benefits: benefits.rows, claimableOffers: benefits.offers, campaignEntries: benefits.entries,
     counts: { ownedAssets: benefits.ownedCount, validatedCoupons: benefits.usable.length, claimableDisplayOffers: benefits.offers.length, campaignEntries: benefits.entries.length, quotedPlans: quoted.length, wheelCandidates: candidates.length },
-    quotedPlans: quoted, candidates, failedPlans: failed, excludedPlans: excluded };
+    quotedPlans: quoted, candidates, failedPlans: failed, excludedPlans: excluded,
+    // The store's real menu (kept local: never sent to DeepSeek) and what each template code did, for fallbacks and /why.
+    menu: { ok: menuOk, error: menuError, shape: menuShape(rawMenu), items: [...index.values()] },
+    templateCodes: [...codeStatus].map(([code, s]) => ({ code, name: names.get(code) || '', ...s })) };
 }
 
 export function prepareDemo(dataset, context, request) {
   validateRequest(request);
-  const plans = dataset.plans.plans.filter((p) => p.people === request.people && p.portion === request.portion && !p.mainCodes.some((c) => request.avoidMainCodes.includes(c)))
+  const plans = dataset.plans.plans.filter((p) => p.people === request.people && (request.portion == null || p.portion === request.portion) && !p.mainCodes.some((c) => request.avoidMainCodes.includes(c)))
     .map((p) => ({ ...clone(p), basePriceFen: p.priceFen, savingFen: 0, couponNames: [], priceLabel: '历史样本价', withinBudget: p.priceFen <= request.people * request.budgetPerPersonFen }))
     .sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
   const candidates = plans.filter((p) => p.withinBudget);
