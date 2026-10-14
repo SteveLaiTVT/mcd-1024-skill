@@ -55,8 +55,8 @@ export function renderReceipt(r, P, { color = P.enabled, columns, note = '' } = 
     P.gray(`卡片链接：${card.url}`),
     ...(card.dropped.length ? [P.gray(`（二维码容量有限，卡片省略了：${card.dropped.join('、')}）`)] : []),
     P.gray(CARD_NOTE), rule,
-    '参赛者独立开发 · 非官方产品 · 本工具不下单、不付款',
-    P.bold('请在麦当劳官方渠道下单'), dotted];
+    '参赛者独立开发 · 非官方产品 · 这张小票不是订单，也不是付款码',
+    P.bold('想买就说 就吃这个了，下单后扫码或在麦当劳 App 付款'), dotted];
 }
 
 export function printReceipt(ui, receipt, { auto = false, note = '' } = {}) {

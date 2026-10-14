@@ -1,10 +1,11 @@
 // Local order commits and a shopping cart, as a git metaphor over picks:
 // /commit records the current pick, /push adds every unpushed commit to the cart
 // (the cart is the "remote": origin/main is the newest commit in it), /cart views or
-// edits it, /graph shows the history. LOCAL ONLY: the cart is a list on this machine,
-// never a real McDonald's order. Nothing here talks to a server, places an order or
-// takes a payment, and there is no payment QR. Commits and cart live in
-// ~/.config/mcd-tui/orders.json, which is local-only and git-ignored.
+// edits it, /graph shows the history. The cart is a list on this machine, never an order by
+// itself: real orders come from the buy flow on the CURRENT pick ('就吃这个了', buy.mjs). Nothing
+// here talks to a server or takes a payment. A cart commit of a pick that was then bought gets
+// the real `orderId` (it leaves the cart); `placed` lists the real orders with their payment link
+// and status. Everything lives in ~/.config/mcd-tui/orders.json (local, git-ignored).
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -13,7 +14,7 @@ import { writePrivateJson } from './allergy.mjs';
 import { money } from './ansi.mjs';
 import { chinaTime } from './card.mjs';
 
-export const CART_NOTE = '购物车只是本地清单，不是真实订单。请在麦当劳官方 App / 小程序按此清单下单支付。';
+export const CART_NOTE = '购物车只是本地清单，不是订单；要下单请选好一餐后说 就吃这个了。';
 export const EMPTY_GRAPH = '还没有订单提交，用 /commit -m ... 创建';
 export const EMPTY_CART = '购物车是空的，用 /commit 再 /push 加入';
 export const NO_PICK = '先选一餐，再 /commit';
@@ -24,7 +25,7 @@ export const defaultOrdersPath = (home = homedir()) => join(home, '.config', 'mc
 
 const HASH = /^[0-9a-f]{7}$/;
 const clean = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
-export const emptyOrders = () => ({ commits: [] });
+export const emptyOrders = () => ({ commits: [], placed: [] });
 
 // '-m "备注"' / "-m '备注'" / '-m “备注”' / '-m 备注' / '' → { note } or { error }.
 export function parseCommitNote(rest = '') {
@@ -51,10 +52,10 @@ export function createCommit(snapshot, { note = '', at, parent = null, taken = n
 }
 
 export const headOf = (state) => state.commits.at(-1) || null;
-// The cart holds exactly the pushed commits; origin/main is the newest of them.
-export const cartOf = (state) => state.commits.filter((c) => c.pushedAt);
-export const unpushed = (state) => state.commits.filter((c) => !c.pushedAt);
-export const originOf = (state) => cartOf(state).at(-1) || null;
+// The cart holds the pushed commits not bought yet; origin/main is the newest pushed commit.
+export const cartOf = (state) => state.commits.filter((c) => c.pushedAt && !c.orderId);
+export const unpushed = (state) => state.commits.filter((c) => !c.pushedAt && !c.orderId);
+export const originOf = (state) => state.commits.filter((c) => c.pushedAt).at(-1) || null;
 export const cartTotal = (cart) => cart.reduce((sum, c) => sum + c.priceFen, 0);
 // Full hash or a unique prefix (≥ 4 characters), like git.
 export function findCommit(state, ref) {
@@ -66,13 +67,20 @@ export function findCommit(state, ref) {
 
 const validTime = (s) => typeof s === 'string' && Number.isFinite(Date.parse(s));
 const validCommit = (c) => c && HASH.test(c.hash) && typeof c.title === 'string' && Number.isSafeInteger(c.priceFen) && typeof c.note === 'string'
-  && Array.isArray(c.parts) && validTime(c.pickedAt) && validTime(c.committedAt) && (c.pushedAt === undefined || validTime(c.pushedAt));
+  && Array.isArray(c.parts) && validTime(c.pickedAt) && validTime(c.committedAt) && (c.pushedAt === undefined || validTime(c.pushedAt))
+  && (c.orderId === undefined || (typeof c.orderId === 'string' && c.orderId.length > 0));
+// Older files have no `placed`.
+const validPlaced = (o) => o && typeof o.orderId === 'string' && o.orderId && typeof o.title === 'string' && typeof o.status === 'string' && validTime(o.createdAt)
+  && typeof o.payUrl === 'string' && Array.isArray(o.hashes) && (o.priceFen === null || Number.isSafeInteger(o.priceFen));
+const normalizePlaced = (o) => ({ orderId: clean(o.orderId), payUrl: o.payUrl, payId: clean(o.payId), title: clean(o.title), storeName: clean(o.storeName), storeCode: clean(o.storeCode),
+  takeWay: clean(o.takeWay), priceFen: o.priceFen, hashes: o.hashes.filter((h) => HASH.test(h)), status: clean(o.status), statusCode: clean(o.statusCode), createdAt: o.createdAt,
+  ...(validTime(o.checkedAt) ? { checkedAt: o.checkedAt } : {}) });
 const normalizeCommit = (c) => ({ hash: c.hash, parent: HASH.test(c.parent) ? c.parent : null, title: clean(c.title),
   parts: c.parts.filter((p) => p && typeof p.name === 'string').map((p) => ({ name: clean(p.name), quantity: Number.isSafeInteger(p.quantity) ? p.quantity : 1 })),
   priceFen: c.priceFen, savingFen: Number.isSafeInteger(c.savingFen) && c.savingFen > 0 ? c.savingFen : 0,
   couponNames: (Array.isArray(c.couponNames) ? c.couponNames : []).filter((n) => typeof n === 'string').map(clean), storeName: clean(c.storeName) || '未选门店',
   pickedAt: c.pickedAt, people: Number.isSafeInteger(c.people) && c.people > 0 ? c.people : 1, sample: c.sample === true, note: clean(c.note), committedAt: c.committedAt,
-  ...(c.pushedAt ? { pushedAt: c.pushedAt } : {}) });
+  ...(c.pushedAt ? { pushedAt: c.pushedAt } : {}), ...(c.orderId ? { orderId: clean(c.orderId) } : {}) });
 
 // { state, error }. A file that cannot be read or parsed yields an empty state plus an error;
 // the caller must then never write the file (the user fixes or removes it first).
@@ -84,12 +92,13 @@ export function loadOrders(file) {
     const data = JSON.parse(raw);
     if (data?.schemaVersion !== 1 || !Array.isArray(data.commits) || !data.commits.every(validCommit)) throw new Error('shape');
     if (new Set(data.commits.map((c) => c.hash)).size !== data.commits.length) throw new Error('duplicate hash');
-    return { state: { commits: data.commits.map(normalizeCommit) }, error: null };
+    if (data.placed !== undefined && (!Array.isArray(data.placed) || !data.placed.every(validPlaced))) throw new Error('placed');
+    return { state: { commits: data.commits.map(normalizeCommit), placed: (data.placed || []).map(normalizePlaced) }, error: null };
   } catch { return { state: emptyOrders(), error: '本地订单记录文件格式无效' }; }
 }
 
 export function saveOrders(file, state) {
-  writePrivateJson(file, { schemaVersion: 1, commits: state.commits });
+  writePrivateJson(file, { schemaVersion: 1, commits: state.commits, placed: state.placed || [] });
 }
 
 export const commitSubject = (c) => [`${c.title} ${money(c.priceFen)}${c.sample ? '(样本价)' : ''}`, c.note, chinaTime(c.pickedAt).slice(5)].filter(Boolean).join(' · ');
@@ -101,10 +110,11 @@ export function renderGraph(state, P) {
   for (const c of [...state.commits].reverse()) {
     const refs = [c === head ? `${P.cyan('HEAD -> ')}${P.green('main')}` : '', c === origin ? P.red('origin/main') : ''].filter(Boolean);
     const decoration = refs.length ? `${P.yellow('(')}${refs.join(P.yellow(', '))}${P.yellow(')')} ` : '';
-    lines.push(`${P.brand('*')} ${P.yellow(c.hash)} ${decoration}${commitSubject(c)}${c.pushedAt ? '' : P.yellow(' (未 push)')}`);
+    const mark = c.orderId ? P.green(` (已下单 ${c.orderId})`) : c.pushedAt ? '' : P.yellow(' (未 push)');
+    lines.push(`${P.brand('*')} ${P.yellow(c.hash)} ${decoration}${commitSubject(c)}${mark}`);
   }
   lines.push('', pending.length ? P.yellow(`${pending.length} 个提交未 push；/push 加入购物车`) : P.green('全部提交都已在购物车（origin/main 与 HEAD 同步）'),
-    P.gray(`购物车 ${cartOf(state).length} 单 · /cart 查看 · 只存本机，不下单、不付款`));
+    P.gray(`购物车 ${cartOf(state).length} 单 · /cart 查看 · 只存本机，不是订单`));
   return lines;
 }
 

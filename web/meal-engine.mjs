@@ -247,6 +247,9 @@ export function couponVariants(items, coupons, limit = 64) {
   }
   return { variants, truncated };
 }
+// calculate-price data.takeWayList → [{ code, title }]; entries without a string code are dropped.
+export const takeWaysOf = (data) => (Array.isArray(data?.takeWayList) ? data.takeWayList : [])
+  .filter((t) => t && typeof t.code === 'string' && t.code).map((t) => ({ code: t.code, title: typeof t.title === 'string' ? t.title : '' }));
 export async function quoteBest(client, common, items, coupons, limit = 64) {
   const { variants, truncated } = couponVariants(items, coupons, limit);
   const baseline = await client.call('calculate-price', { ...common, items: variants[0] });
@@ -265,6 +268,8 @@ export async function quoteBest(client, common, items, coupons, limit = 64) {
     originalPriceFen: amount(best.data.originalPrice) && best.data.originalPrice >= best.data.price ? best.data.originalPrice : null,
     officialDiscountFen: amount(best.data.discount) ? best.data.discount : null,
     couponNames: bestCart.filter((i) => i.couponId).map((i) => names.get(i.couponId)), quotedAt: best.datetime,
+    // The exact priced items (roundList, modification, couponId/couponCode) and pickup options, kept for create-order.
+    orderItems: clone(bestCart), takeWays: takeWaysOf(best.data),
     successfulCouponQuotes: successes, failedCouponQuotes: failures, variantLimitReached: truncated, comparisonComplete: !truncated && !failures };
 }
 async function mapLimited(values, fn, limit = 2) {
@@ -304,7 +309,12 @@ export async function prepareWheel(client, templates, context, request, onProgre
   const results = await mapLimited(ready, async ({ recipe, cart }) => {
     try {
       const quote = await quoteBest(client, common, cart.items, benefits.usable);
-      return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote,
+      // The report must not carry account-private coupon identifiers (couponId/couponCode):
+      // orderItems are for create-order, and the buy flow re-prices (quoteBest directly)
+      // to get fresh ones with coupons before ordering. Strip them here; the plan keeps
+      // productCode / quantity / modification / roundList, which is all buyContext needs.
+      const orderItems = (quote.orderItems || []).map(({ couponId, couponCode, ...rest }) => ({ ...rest }));
+      return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote, orderItems,
         packages: cart.packages, parts: cart.parts, mainCodes: cart.mainCodes, withinBudget: quote.priceFen <= request.people * request.budgetPerPersonFen };
     } catch { return { id: recipe.id, title: recipe.title, reason: '整单核价失败，本次不入盘' }; }
     finally { done++; onProgress({ step: 3, text: `正在比较整单价格（${done} / ${ready.length}）…`, benefits }); }

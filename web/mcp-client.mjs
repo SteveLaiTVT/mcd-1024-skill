@@ -2,7 +2,7 @@
 export const ENDPOINT = 'https://mcp.mcd.cn';
 export const READ_TOOLS = new Set([
   'now-time-info', 'available-coupons', 'query-my-coupons', 'query-store-coupons',
-  'campaign-calendar', 'query-nearby-stores', 'query-meals', 'query-meal-detail', 'calculate-price', 'order-list', 'delivery-query-addresses',
+  'campaign-calendar', 'query-nearby-stores', 'query-meals', 'query-meal-detail', 'calculate-price', 'order-list', 'delivery-query-addresses', 'query-order',
 ]);
 
 export class MCPError extends Error {
@@ -41,6 +41,17 @@ export function businessResponse(result) {
     throw new MCPError('麦当劳未完成这次业务请求，请检查 Token 或稍后重查。', { status: Number(body?.code) });
   }
   return body;
+}
+
+// The official business message of a refused request (e.g. "门店已打烊"), cleaned of control characters; '' if none.
+export function businessMessage(result) {
+  let body = result?.structuredContent, text = '';
+  if (body == null) {
+    text = (result?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    try { body = JSON.parse(text); } catch { body = null; }
+  }
+  const message = typeof body?.message === 'string' ? body.message : typeof body?.msg === 'string' ? body.msg : body == null ? text : '';
+  return String(message).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 120);
 }
 
 export class MCPClient {
@@ -115,6 +126,19 @@ export class MCPClient {
       return businessResponse(await this.#rpc('tools/call', { name: 'auto-bind-coupons', arguments: {} }, { retrySafe: false }));
     } catch {
       throw new MCPError('领券结果未确认。请先刷新券包，避免重复领取。', { ambiguous: true });
+    }
+  }
+  async createOrder(args) {
+    // Real order. Only called after the terminal's typed 'yes'; never retried. A transport failure is
+    // ambiguous (the order may exist); a business refusal carries the official message.
+    let result;
+    try { result = await this.#rpc('tools/call', { name: 'create-order', arguments: args }, { retrySafe: false }); }
+    catch { throw new MCPError('下单结果未确认（连接中断或响应不完整）。请先在麦当劳 App 的订单列表核对，避免重复下单。', { ambiguous: true }); }
+    try { return businessResponse(result); }
+    catch (e) {
+      // The one place a server message is shown (the user must know why no order was made); never with the token.
+      const reason = this.#token ? businessMessage(result).split(this.#token).join('[已隐藏]') : businessMessage(result);
+      throw new MCPError(reason ? `麦当劳未创建订单：${reason}` : `麦当劳未创建订单：${e.message}`, { status: e.status });
     }
   }
 }

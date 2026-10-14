@@ -164,7 +164,7 @@ export function renderPick(plan, P, { report, remaining = null, signals = [], so
   if (thought) lines.push(`${P.cyan('助理想法')}${thoughtSource === 'local' ? P.gray('（本地）') : ''}：${thought}`);
   if (source) lines.push(P.gray(source));
   if (report?.sourceKind === 'demo-snapshot') lines.push(P.yellow('样本价，仅供体验；实时价格请连接后重新核价。'));
-  else if (remaining != null) lines.push(P.gray(`报价 ${clock(remaining)} 后失效。本工具不下单或付款，请在麦当劳官方渠道下单。`));
+  else if (remaining != null) lines.push(P.gray(`报价 ${clock(remaining)} 后失效。想吃就说“就吃这个了”：先领券再下单（到店自取），付款在麦当劳支付链接或 App。`));
   return lines;
 }
 
@@ -271,8 +271,9 @@ export const COMMAND_HELP = [
   [['like', 'less'], '/like · /less', '对上一份给反馈（仅本次会话内存）'],
   [['receipt'], '/receipt', '打印最近一份的小票；扫二维码打开套餐卡片（静态页，不是付款码）'],
   [['commit'], '/commit -m "备注"', '把当前这一餐记成本地提交（7 位 hash），不下单'],
-  [['push'], '/push', '把未 push 的提交全部加入购物车（本地清单，不是真实订单，不付款）'],
+  [['push'], '/push', '把未 push 的提交全部加入购物车（本地清单，还不是订单）'],
   [['cart'], '/cart [rm <hash>|clear]', '查看购物车；rm 移出一单，clear 清空（需输入 yes）'],
+  [['order'], '/order [订单号]', '列出真实订单（订单号 · 餐 · 金额 · 状态 · 时间）；带订单号查实时状态（也可以回复“支付完成”）'],
   [['graph'], '/graph', '像 git log --graph 一样看提交历史和 origin/main'],
   [['radar'], '/radar [recent|year] [年] · /radar apply', '本餐雷达图 + 历史订单热力图 + 最近吃了啥；apply 把前两天的主食加入避开'],
   [['weather'], '/weather', '查询门店所在城市天气，供饭搭子参考'],
@@ -290,6 +291,9 @@ export function helpLines(P) {
     P.gray('  例：1人、7分饱、人均30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
     P.gray(`  没写的默认：${DEFAULT_INTENT.people} 人 · ${DEFAULT_INTENT.portion} 分饱 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
     P.gray('  只输入 / 或命令开头（如 /ca）会列出匹配的命令；终端里可用 ↑↓ 选择'),
+    `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 就这个 / 要这个 / 下单；到店自取，不支持外送）')}`,
+    P.gray('  先列出这单能用、要领的券，再问“是这家店吗？”；回 是 才领券、重新核价（只会持平或更便宜）并在麦当劳创建订单，'),
+    P.gray('  然后给支付链接和支付二维码，扫码或在麦当劳 App 付款；回 不是 就取消。付完说 支付完成 查订单状态。'),
     '',
     ...COMMAND_HELP.map(([, cmd, text]) => c(cmd, text)),
   ];

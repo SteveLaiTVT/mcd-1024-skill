@@ -18,7 +18,9 @@ if (args.has('--help') || args.has('-h')) {
   --no-profile                过敏记录、提交和购物车只留在本次会话内存，不读写本地文件
 凭证只从进程环境读取，不会询问、显示或写入任何文件。
 过敏记录（/allergy）只保存在本机 ${defaultProfilePath()}，只用于本地筛选，从不发送。
-提交与购物车（/commit /push /cart）只保存在本机 ${defaultOrdersPath()}；购物车不是真实订单，不下单、不付款。`);
+提交、购物车与真实订单记录（/commit /push /cart /order）只保存在本机 ${defaultOrdersPath()}。
+选好一餐后说“就吃这个了”才会下单：先列出要领的券，回答“是这家店”后才领券并通过麦当劳 MCP 下真实的到店自取订单；
+付款在官方支付链接或麦当劳 App 完成，本工具不经手付款。`);
   process.exit(0);
 }
 

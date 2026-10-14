@@ -25,7 +25,7 @@ export function alaCartePlan({ code, name }, request, quote, priceLabel) {
     title: people > 1 ? `${people}人 · 单点${name} × ${people}` : `单点 · ${name}`, wheelTitle: name, wheelKind: '单点主食',
     packages: [], parts: [{ code, name, quantity: people }], mainCodes: [code], fitsPortion: fits, priceLabel,
     basePriceFen: quote.basePriceFen, priceFen: quote.priceFen, savingFen: quote.savingFen, couponNames: quote.couponNames || [],
-    ...(quote.quotedAt ? { quotedAt: quote.quotedAt } : {}), withinBudget: quote.priceFen <= people * request.budgetPerPersonFen };
+    ...(quote.quotedAt ? { quotedAt: quote.quotedAt } : {}), ...(quote.orderItems ? { orderItems: quote.orderItems, takeWays: quote.takeWays || [] } : {}), withinBudget: quote.priceFen <= people * request.budgetPerPersonFen };
 }
 
 // Demo: menu snapshot prices, no coupons.

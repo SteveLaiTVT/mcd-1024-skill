@@ -7,12 +7,14 @@ import { createPalette, box, fit, padEnd, money } from './ansi.mjs';
 import { TuiSession, TuiError } from './session.mjs';
 import { runAgentFlow } from './agent-flow.mjs';
 import { NOTICE, statusLine, renderStores, renderBenefits, renderReport, renderPick, renderAgentResult, renderHeatmap, helpLines, renderClaimable, renderAllergies, renderActivities, HELP_COMMANDS } from './render.mjs';
-import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery } from './intent.mjs';
+import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery, parseBuyIntent } from './intent.mjs';
 import { parseAllergyStatement } from './allergy.mjs';
 import { printReceipt, maybeReceipt } from './receipt.mjs';
 import { parseCommitNote, renderGraph, renderCart, commitLine, headOf, cartOf, unpushed, CART_USAGE } from './orders.mjs';
 import { renderRadar, NO_PICK_RADAR } from './radar-chart.mjs';
 import { matchCommands, pickerLines, runPicker } from './picker.mjs';
+import { isStoreConfirm, isPaymentReply, renderBuySummary, renderPayment, renderPlaced, renderOrderStatus,
+  BUY_NO_PICK, BUY_DEMO, BUY_CANCELLED, PICKUP_ONLY, NO_PENDING, PENDING, PAY_FOLLOWUP } from './buy.mjs';
 
 const message = (e) => e instanceof TuiError || e instanceof MCPError || e instanceof DeepSeekError ? e.message : `未完成：${e?.message || e}`;
 
@@ -210,6 +212,10 @@ export async function runTui({ dataset, input = process.stdin, output = process.
       ui.panel('购物车（本地清单）', renderCart(session.orders, P), 'yellow');
     },
     graph: () => ui.panel('提交历史 · git log --graph', renderGraph(session.orders, P)),
+    async order(args) {
+      if (!args.length) return ui.panel('真实订单', renderPlaced(session.orders.placed, P));
+      await queryOrder(args[0]);
+    },
     async buddy(args) {
       const mood = args.find((a) => MOODS.includes(a)) || 'normal', local = args.includes('local') || !session.hasDeepSeek;
       const step = ui.begin(local ? '本地偏好推荐' : '饭搭子双 Agent（DeepSeek）');
@@ -296,6 +302,50 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     if (!r.added.length && !r.existing.length) ui.error(`没有识别出过敏原：${tokens.join(' ')}`);
   }
 
+  async function queryOrder(orderId) {
+    if (!/^[\w-]{4,64}$/.test(orderId)) return ui.error('订单号格式不对；/order 查看最近的订单号。');
+    const step = ui.begin('查询订单状态（query-order，只读）');
+    try {
+      const s = await session.queryOrder(orderId);
+      step.ok(s.label);
+      ui.panel('订单状态', renderOrderStatus(orderId, s, P));
+      if (s.code === '1') ui.write(P.gray(`还没支付：扫下单时的支付二维码或打开麦当劳 App。${PAY_FOLLOWUP}`));
+    } catch (e) { step.fail(message(e)); }
+  }
+
+  // '就吃这个了' on the current pick. The store question is the only gate: '是' claims the listed
+  // coupons, re-prices, then creates the order (create-order, pickup) and shows its payment link.
+  async function buy(intent) {
+    if (intent.delivery) return ui.error(PICKUP_ONLY);
+    if (!session.lastReceipt) return ui.info(BUY_NO_PICK);
+    const look = ui.begin(session.demo ? '下单前查券（样本）' : '下单前查券（available-coupons · 券包，只读）');
+    let preview;
+    try { preview = await session.buyPreview({ takeWay: intent.takeWay, onProgress: (p) => look.progress(p.text) }); look.ok(''); }
+    catch (e) { return look.fail(message(e)); }
+    ui.panel(`就吃这个 · 到店自取${preview.demo ? '（演示）' : ''}`, renderBuySummary(preview, P), 'yellow');
+    if (preview.demo) return ui.error(`${BUY_DEMO}：没有领券，也没有调用 create-order。`);
+    if (!isStoreConfirm(await nextLine('是这家店吗？> '))) return ui.info(BUY_CANCELLED);
+    const confirmed = true;
+    if (preview.claimable.length) {
+      const claiming = ui.begin('领券（auto-bind-coupons）');
+      try { const r = await session.buyClaim(preview, { confirmed }); claiming.ok(`已领取 ${r.claimed} 张`); }
+      catch (e) { return claiming.fail(`${message(e)} 购物车没有变化。`); }
+    }
+    const pricing = ui.begin('重新核价（calculate-price）');
+    let priced;
+    try { priced = await session.buyReprice(preview, { confirmed, onProgress: (p) => pricing.progress(p.text) }); }
+    catch (e) { return pricing.fail(`${message(e)} 购物车没有变化。`); }
+    const was = preview.receipt.priceFen;
+    pricing.ok(`最终合计 ${P.bold(money(priced.priceFen))}${priced.priceFen < was ? `（比刚才 ${money(was)} 少 ${money(was - priced.priceFen)}）` : '（和刚才一样）'}${priced.couponNames.length ? ` · 用券：${priced.couponNames.join('、')}` : ''}`);
+    const placing = ui.begin('创建麦当劳订单（create-order · 到店自取）');
+    let result;
+    try { result = await session.buyPlace(preview, priced, { confirmed }); placing.ok(''); }
+    catch (e) { return placing.fail(`${message(e)} 购物车没有变化。`); }
+    ui.write('');
+    renderPayment(result.order, P, { columns: ui.columns() }).forEach((line) => ui.write(line));
+    ui.write(P.gray(`订单已记录${ordersNote(result.saved)}${result.order.hashes.length ? `；已移出购物车：${result.order.hashes.join(' ')}` : ''}`));
+  }
+
   function selectStore(n) {
     const item = pendingStores?.stores[n - 1];
     if (!item) return ui.error('没有这个序号，先 /store 搜索门店。');
@@ -327,6 +377,15 @@ export async function runTui({ dataset, input = process.stdin, output = process.
       }
       return command(args, text.slice(1 + name.length).trim());
     }
+    // '支付完成' / '支付失败' after buying: check the pending order's real status, never assume it.
+    if (isPaymentReply(text)) {
+      const pending = session.pendingOrder();
+      if (!pending) return ui.info(NO_PENDING);
+      return queryOrder(pending.orderId);
+    }
+    // '就吃这个了' and close variants: buy the current pick. Matched locally only, never by a model.
+    const buyIntent = parseBuyIntent(text);
+    if (buyIntent) return buy(buyIntent);
     // Allergy statements are recorded locally and never reach the intent agent.
     const allergy = parseAllergyStatement(text);
     let rest = text;
@@ -353,9 +412,10 @@ export async function runTui({ dataset, input = process.stdin, output = process.
     `默认选店区域：${P.bold(DEFAULT_STORE_SEARCH.label)}${session.demo ? P.gray('（样本模式不搜索，用样本门店）') : ''}`,
     `默认餐量：${DEFAULT_INTENT.people} 人 · ${DEFAULT_INTENT.portion} 分饱 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}`,
     `过敏记录：${session.allergies.length ? P.bold(session.allergies.join('、')) : '无'}${session.profileError ? P.red(`（${session.profileError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机，本地筛选，从不发送；/allergy 管理）')}`,
-    `购物车：${cartOf(session.orders).length} 单 · 未 push ${unpushed(session.orders).length} 个提交${session.ordersError ? P.red(`（${session.ordersError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机；不是真实订单，/cart 查看）')}`,
+    `购物车：${cartOf(session.orders).length} 单 · 未 push ${unpushed(session.orders).length} 个提交${session.ordersError ? P.red(`（${session.ordersError}，不会覆盖该文件）`) : ''}${P.gray('（只存本机，不是订单；/cart 查看）')}`,
+    ...(session.pendingOrder() ? [P.yellow(`有 ${session.orders.placed.filter((o) => o.status === PENDING).length} 笔真实订单待支付：/order 查看`)] : []),
     P.gray('指令里写明的人数 / 食量 / 预算 / 位置（@城市 关键词）优先；/set、/store 也会覆盖默认。'),
-    P.gray('输入 /help 查看命令；不下单、不付款，领券需明确确认。'),
+    P.gray('输入 /help 查看命令；选好一餐后说 就吃这个了 直接下单（到店自取）：先列出要领的券，回答“是这家店”才领券并下单，付款在麦当劳支付链接或 App。'),
   ]);
   if (autoConnect && !session.demo && session.hasMcdToken) await commands.connect();
   else if (!session.demo && !session.hasMcdToken) ui.error('请先 export MCD_TOKEN=… 再启动；也可以用 npm run tui -- --demo 体验历史样本。');

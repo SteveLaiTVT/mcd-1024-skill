@@ -305,7 +305,7 @@ test('receipt: the QR is a meal-card URL (delimited UTF-8 in the fragment) that 
   assert.throws(() => cardUrl(r, { base: `https://example.invalid/${'x'.repeat(220)}` }), /过长/);
 
   const text = stripAnsi(renderReceipt(r, createPalette(false), { note: '少冰' }).join('\n'));
-  for (const s of [QR_LABEL, '卡片链接：https://stevelaitvt.github.io/mcd-1024-skill/receipt/#', '备注：少冰', '非官方产品', '请在麦当劳官方渠道下单', '时间：2026-10-13 12:00', '券已省', '¥3.00', '快过期立减券', plan.title]) assert(text.includes(s), s);
+  for (const s of [QR_LABEL, '卡片链接：https://stevelaitvt.github.io/mcd-1024-skill/receipt/#', '备注：少冰', '非官方产品', '想买就说 就吃这个了', '时间：2026-10-13 12:00', '券已省', '¥3.00', '快过期立减券', plan.title]) assert(text.includes(s), s);
   assert.equal(QR_LABEL, '扫码查看套餐卡片');
   assert(!/(?<!不是)付款码|扫码(?:支付|付款)|支付码/.test(text));
   // Square modules when the terminal is wide enough, half blocks otherwise.
@@ -316,7 +316,7 @@ test('receipt: the QR is a meal-card URL (delimited UTF-8 in the fragment) that 
 
 test('the static card page is self-contained: decodes the fragment, shows the disclaimers, and makes no network requests', async () => {
   const html = await readFile(new URL('../web/receipt-card.html', import.meta.url), 'utf8');
-  for (const s of ['麦麦饱饱盘 · 选餐卡片', '非官方产品 · 参赛者独立开发 · 只记录这次的选择', '请在麦当劳官方渠道下单', '本工具不下单、不付款', '链接里没有订单数据',
+  for (const s of ['麦麦饱饱盘 · 选餐卡片', '非官方产品 · 参赛者独立开发 · 只记录这次的选择', '请在麦当劳官方渠道下单', '这张卡片不是订单，也不是付款码', '链接里没有订单数据',
     'https://github.com/SteveLaiTVT/mcd-1024-skill', "default-src 'none'", 'location.hash', 'textContent', 'v1~', 'decodeURIComponent']) assert(html.includes(s), s);
   for (const banned of [/fetch\(/, /XMLHttpRequest/, /sendBeacon/, /innerHTML/, /<img/i, /<link[^>]+stylesheet/i, /analytics|gtag/i, /麦当劳官方(?:网站|页面)|official site/i]) assert(!banned.test(html), String(banned));
   const build = await readFile(new URL('../scripts/build_frontend.mjs', import.meta.url), 'utf8');
@@ -333,7 +333,7 @@ test('piped demo smoke: a pick, /receipt, /radar, /quit; automatic receipts foll
   const receipts = (text) => text.split(QR_LABEL).length - 1;
   const text = await run('/receipt\n1人 7分饱 人均30\n/receipt\n/radar\n/quit\n', [0.99]);
   assert.match(text, /还没有挑出的套餐/);
-  for (const s of ['这一餐就吃', '助理想法', '麦麦饱饱盘 · 选餐小票', '非官方产品', '请在麦当劳官方渠道下单', '麦当劳雷达', '再见']) assert(text.includes(s), s);
+  for (const s of ['这一餐就吃', '助理想法', '麦麦饱饱盘 · 选餐小票', '非官方产品', '想买就说 就吃这个了', '麦当劳雷达', '再见']) assert(text.includes(s), s);
   assert.equal(receipts(text), 1, 'only the explicit /receipt prints when the draw misses');
   const three = await run('1人 7分饱 人均30 用转盘\n/wheel\n/wheel\n/quit\n', [0.2, 0.5, 0.9]);
   assert.equal(receipts(three), 1, 'draws 0.2 / 0.5 / 0.9 → exactly one automatic receipt');

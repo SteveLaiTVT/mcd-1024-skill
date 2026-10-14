@@ -2,7 +2,7 @@
 // only, live in private fields, and are never printed or written anywhere.
 // Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
 import { MCPClient, MCPError } from '../web/mcp-client.mjs';
-import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue } from '../web/meal-engine.mjs';
+import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest } from '../web/meal-engine.mjs';
 import { readHistory, demoHistory, shiftDay } from '../web/order-history.mjs';
 import { storeResults } from '../web/store-search.mjs';
 import { DeepSeekClient, DeepSeekError } from '../web/deepseek-client.mjs';
@@ -15,6 +15,9 @@ import { alaCarteMains, demoAlaCarte, liveAlaCarte, mergeAlaCarte, applyUpgrades
 import { applyAllergyFilter, normalizeAllergens, loadProfile, saveProfile } from './allergy.mjs';
 import { activitiesFromCalendar, activitiesFromSnapshot, classifyActivities } from './activity.mjs';
 import { emptyOrders, loadOrders, saveOrders, createCommit, headOf, unpushed, cartOf, findCommit, NO_PICK, EMPTY_GRAPH } from './orders.mjs';
+import { money } from './ansi.mjs';
+import { buyContext, validBuyContext, baseItems, chooseTakeWay, createOrderArgs, claimFailures, orderResult, orderStatus,
+  BUY_NO_PICK, BUY_DEMO, BUY_NO_CONTEXT, BUY_CONFIRM_NEEDED, PENDING } from './buy.mjs';
 
 export class TuiError extends Error {}
 
@@ -127,7 +130,7 @@ export class TuiSession {
   commitOrder(note = '') {
     if (!this.lastReceipt) throw new TuiError(NO_PICK);
     const commit = createCommit(this.lastReceipt, { note, at: this.now(), parent: headOf(this.orders)?.hash || null, taken: new Set(this.orders.commits.map((c) => c.hash)) });
-    this.orders = { commits: [...this.orders.commits, commit] };
+    this.#setOrders([...this.orders.commits, commit]);
     return { commit, saved: this.#saveOrders() };
   }
   // Adds every unpushed commit to the local cart (origin/main catches up to HEAD). Returns { pushed, saved }; pushed is [] when up to date.
@@ -153,12 +156,87 @@ export class TuiSession {
     this.#setOrders(this.orders.commits.map(({ pushedAt, ...rest }) => rest));
     return { removed, saved: removed.length ? this.#saveOrders() : this.#ordersPersisted() };
   }
-  #setOrders(commits) { this.orders = { commits }; }
+  #setOrders(commits, placed = this.orders.placed) { this.orders = { commits, placed }; }
   #ordersPersisted() { return Boolean(this.ordersPath) && !this.ordersError; }
   #saveOrders() {
     if (!this.ordersPath || this.ordersError) return false;
     try { saveOrders(this.ordersPath, this.orders); return true; }
     catch { throw new TuiError('订单记录没能写入本地文件，本次会话内仍然生效；请检查 ~/.config/mcd-tui 的权限。'); }
+  }
+  // After a real order exists, a failed local write must not look like a failed order.
+  #trySaveOrders() { try { return this.#saveOrders(); } catch { return false; } }
+
+  // Buy flow ('就吃这个了') on the CURRENT pick. Step 1, read-only: the pick, its create-order inputs,
+  // and a fresh coupon check (available-coupons / query-my-coupons) for the pick's store, so the store
+  // question shows exactly which coupons a '是' will claim. Demo mode shows the sample picture only.
+  async buyPreview({ takeWay = null, onProgress } = {}) {
+    const receipt = this.lastReceipt;
+    if (!receipt) throw new TuiError(BUY_NO_PICK);
+    const base = { receipt, storeName: receipt.storeName, used: [...receipt.couponNames], takeWayTitle: takeWay };
+    if (this.demo) return { ...base, demo: true, context: null, claimable: this.couponPicture().claimable, takeWay: null };
+    const context = receipt.buy;
+    if (!validBuyContext(context)) throw new TuiError(BUY_NO_CONTEXT);
+    const client = this.requireClient();
+    this.benefits = await inspectBenefits(client, { storeCode: context.storeCode, orderType: 1, beType: 1 }, onProgress);
+    return { ...base, demo: false, context, claimable: claimableList(this.benefits.offers, this.benefits.entries),
+      takeWay: chooseTakeWay(context.takeWays, { title: takeWay, code: context.takeWayCode }) };
+  }
+  #buyClient(confirmed) {
+    if (confirmed !== true) throw new TuiError(BUY_CONFIRM_NEEDED);
+    if (this.demo) throw new TuiError(BUY_DEMO);
+    return this.requireClient();
+  }
+  // Step 2 (after '是'): claim the coupons the preview listed. auto-bind-coupons is never retried;
+  // any failed coupon aborts the buy before an order exists. Old quotes are stale afterwards.
+  async buyClaim(preview, { confirmed = false } = {}) {
+    const client = this.#buyClient(confirmed);
+    if (!preview.claimable.length) return { claimed: 0 };
+    this.invalidate(); this.benefits = null;
+    const data = (await client.claimAll()).data, failed = claimFailures(data);
+    if (failed.length) throw new TuiError(`这些券没领到：${failed.join('、')}。没下单。`);
+    if (!Number.isSafeInteger(data?.successCount)) throw new TuiError('领券结果未确认（官方没有返回领取数量），没下单；请先 /coupons 核对券包。');
+    return { claimed: data.successCount };
+  }
+  // Step 3: re-price the pick's items with the coupons held now (calculate-price via quoteBest).
+  // The final total may stay the same or go down; a failed or higher quote aborts.
+  async buyReprice(preview, { confirmed = false, onProgress } = {}) {
+    const client = this.#buyClient(confirmed), ctx = preview.context, common = { storeCode: ctx.storeCode, orderType: 1, beType: 1 };
+    let quote;
+    try {
+      if (!this.benefits) this.benefits = await inspectBenefits(client, common, onProgress);
+      quote = await quoteBest(client, common, baseItems(ctx.items), this.benefits.usable);
+    } catch (e) { throw new TuiError(`重新核价没有完成（${e instanceof MCPError || e instanceof TuiError ? e.message : '官方核价失败'}），没下单。`); }
+    if (quote.priceFen > preview.receipt.priceFen) throw new TuiError(`重新核价是 ${money(quote.priceFen)}，比刚才的 ${money(preview.receipt.priceFen)} 贵，没下单；请重新选一餐。`);
+    const takeWay = chooseTakeWay(quote.takeWays, { title: preview.takeWayTitle, code: preview.takeWay?.code });
+    if (!takeWay) throw new TuiError('官方核价没有返回取餐方式（takeWayList），没下单。');
+    return { priceFen: quote.priceFen, items: quote.orderItems, couponNames: quote.couponNames, takeWay };
+  }
+  // Step 4, the single real-order path: MCP create-order (pickup), never retried. On success the
+  // order is recorded as 待支付 with its payment link; a cart commit of this pick leaves the cart.
+  async buyPlace(preview, priced, { confirmed = false } = {}) {
+    const client = this.#buyClient(confirmed);
+    const args = createOrderArgs({ storeCode: preview.context.storeCode, takeWayCode: priced.takeWay.code, items: priced.items });
+    const result = orderResult((await client.createOrder(args)).data);
+    if (!result.orderId) throw new TuiError('下单结果未确认：官方响应里没有订单号。请先在麦当劳 App 的订单列表核对，避免重复下单。');
+    const fromCart = new Set(cartOf(this.orders).filter((c) => c.pickedAt === preview.receipt.at).map((c) => c.hash));
+    const order = { orderId: result.orderId, payUrl: result.payUrl, payId: result.payId, title: preview.receipt.title, storeName: preview.storeName, storeCode: preview.context.storeCode,
+      takeWay: priced.takeWay.title || priced.takeWay.code, priceFen: result.paidFen ?? priced.priceFen, hashes: [...fromCart],
+      status: PENDING, statusCode: '1', createdAt: new Date(this.now()).toISOString() };
+    this.#setOrders(this.orders.commits.map((c) => fromCart.has(c.hash) ? { ...c, orderId: order.orderId } : c), [...this.orders.placed, order]);
+    return { order, saved: this.#trySaveOrders() };
+  }
+  // The newest order still waiting for payment, as far as the local record knows.
+  pendingOrder() { return [...this.orders.placed].reverse().find((o) => o.status === PENDING) || null; }
+  // Live status via query-order (read-only); updates the local record when the order is ours.
+  async queryOrder(orderId) {
+    const data = (await this.requireClient().call('query-order', { orderId })).data;
+    const status = orderStatus(data), known = this.orders.placed.some((o) => o.orderId === orderId);
+    if (known && status.reported) {
+      const at = new Date(this.now()).toISOString();
+      this.#setOrders(this.orders.commits, this.orders.placed.map((o) => o.orderId === orderId ? { ...o, status: status.label, statusCode: status.code, checkedAt: at } : o));
+      this.#trySaveOrders();
+    }
+    return { orderId, known, ...status };
   }
 
   async quote(onProgress = () => {}) {
@@ -206,7 +284,9 @@ export class TuiSession {
   userProfile() { return buildProfile({ history: this.history, preferences: this.preferences, request: this.request, now: this.now(), date: calendarContext(this.now()).date }); }
   recordPick(plan) {
     this.lastPick = plan;
-    this.lastReceipt = receiptFrom(plan, { storeName: this.store?.storeName, at: this.now(), report: this.wheel.report });
+    // Live picks also keep their create-order inputs for the buy flow ('就吃这个了').
+    const buy = buyContext(plan, this.wheel.report);
+    this.lastReceipt = { ...receiptFrom(plan, { storeName: this.store?.storeName, at: this.now(), report: this.wheel.report }), ...(buy ? { buy } : {}) };
   }
   get report() { return this.wheel.report; }
   fresh() { return this.wheel.fresh(); }
