@@ -70,7 +70,9 @@ test('after a pick, info questions read the cache and do not reprint a card or d
   assert.match(parts, /麦香鸡/);
   assert.doesNotMatch(parts, /编号推荐/);
   const ing = await ask(session, '这个有什么料');
-  assert.match(ing, /不是完整配料表/);
+  // Demo plans have no orderItems productCode. The candidate id cache is not a detail.
+  assert.match(ing, /没查到/);
+  assert.doesNotMatch(ing, /编号推荐/);
   assert(!ing.includes(QR_LABEL));
 });
 
@@ -78,9 +80,11 @@ test('a cache miss says so, and a complete:false cache is never called a full in
   const session = new TuiSession({ dataset, env: {}, demo: true, llm: createFakeLlm() });
   const miss = await ask(session, '有什么料');
   assert.match(miss, /没查到/);
-  session.recordPick({ id: 'p', title: '麦香鸡', priceFen: 1390, parts: [{ name: '麦香鸡', quantity: 1 }], savingFen: 0, couponNames: [] });
-  session.detailCache = { p: { code: 'p', name: '麦香鸡', parts: [{ name: '麦香鸡' }], removable: [], complete: false, unknown: true } };
+  session.recordPick({ id: 'p', title: '麦香鸡', priceFen: 1390, parts: [{ name: '麦香鸡', quantity: 1 }], orderItems: [{ productCode: '1450' }], savingFen: 0, couponNames: [] });
+  session.detailCache = { p: { code: 'p', name: '麦香鸡', parts: [{ name: '麦香鸡' }], removable: ['合成酱'], complete: false, unknown: false },
+    '1450': { code: '1450', name: '麦香鸡', parts: [{ name: '麦香鸡' }], removable: [], complete: false, unknown: true } };
   const text = await ask(session, '有什么料');
   assert.match(text, /不是完整配料表/);
   assert.match(text, /配料未知/);
+  assert.doesNotMatch(text, /合成酱/);
 });

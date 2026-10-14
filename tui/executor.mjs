@@ -101,10 +101,11 @@ export function createExecutor({ session, ui, ask, message }) {
   function infoFromCache(kind, { meat = '牛肉' } = {}) {
     const pick = session.lastPick;
     const cache = Object.values(session.detailCache || {});
-    // Match the picked meal by code, never by loose name, and never fall back to
-    // an unrelated cached entry: answering "有什么料" with another meal's data is worse than saying so.
-    const codes = new Set([pick?.id, ...(pick?.orderItems || []).map((i) => i?.productCode)].filter(Boolean));
-    const cached = pick ? cache.find((d) => d && codes.has(d.code)) || null : null;
+    // Match the picked meal by orderItems productCode only. pick.id is a template id,
+    // not a productCode. Prefer a real detail over an unknown placeholder, and never
+    // an unrelated cached entry: answering "有什么料" with another meal is worse than saying so.
+    const codes = new Set((pick?.orderItems || []).map((i) => i?.productCode).filter(Boolean));
+    const cached = pick ? cache.find((d) => d && codes.has(d.code) && !d.unknown) || cache.find((d) => d && codes.has(d.code)) || null : null;
     const names = [...(pick?.parts || []).map((p) => p.name), ...(cached?.parts || []).map((p) => p.name), pick?.title].filter(Boolean);
     if (!pick && !cached) return ui.info('没查到。这轮上下文里没有这份餐的配料。');
     if (kind === 'info_meat') {

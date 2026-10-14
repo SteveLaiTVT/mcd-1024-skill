@@ -266,19 +266,19 @@ export class TuiSession {
     const capture = (p) => { if (p?.benefits) this.benefits = p.benefits; onProgress(p); };
     const report = this.demo
       ? prepareDemo({ plans: this.dataset.plans, offers: this.dataset.offers, campaigns: this.dataset.campaigns }, { ...context, storeName: this.store.storeName }, request)
-      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames });
+      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames, signal });
     if (report.menu?.ok) this.menu = { storeCode: context.storeCode, items: report.menu.items, shape: report.menu.shape };
     const setsQuoted = report.quotedPlans.length;
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
     const mains = alaCarteMains(this.mainNames, request, new Set(this.dataset.templates.mainProductCodes));
     const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
-      : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress) : {};
+      : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress, { signal }) : {};
     mergeAlaCarte(report, singles);
     // No template priced at this store (not a budget problem): price what the store's own menu offers instead.
     if (!this.demo && !setsQuoted && !report.candidates.length && report.menu?.ok) {
       const picks = fallbackPicks(report.menu.items, request);
       if (picks.length) {
-        const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress);
+        const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress, { signal });
         mergeAlaCarte(report, extra);
         report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
         report.menuFallback = { tried: picks.length, quoted: extra.plans.length };

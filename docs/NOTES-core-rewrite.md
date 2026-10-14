@@ -8,17 +8,17 @@
 
 3. 购物车磁盘格式仍是 `commits` + `placed` + 7 位 hash，这样已有的 `loadOrders` 和购买记录还能读。用户命令不再出现 `/commit`、`/push`、`/graph`、`Everything up-to-date`、`购物车没有变化`。`renderGraph` 还在文件里，没有挂到命令上。清空取消文案是「已取消，没清空」。下单失败文案是「没下单」。麦当劳原因里含「购物车」时前缀是「麦当劳说：」，其余仍是「麦当劳未创建订单：」。
 
-4. 配料和组成由 `tui/info.mjs` 只读 `detailCache`，不采用模型 `answer` 字段。没有缓存时说「没查到」。`complete !== true` 时必须带「不是完整配料表」。不再用正则按品名去菜单里现查。
+4. 配料和组成由 `tui/executor.mjs` 的 `infoFromCache` 只读 `detailCache`，再交给 `tui/info.mjs` 渲染，不采用模型 `answer` 字段。匹配只用 `orderItems` 的 `productCode`，优先 `unknown !== true` 的条目，不用候选合成 id。没有缓存时说「没查到」。`complete !== true` 时必须带「不是完整配料表」。不再用正则按品名去菜单里现查。
 
-5. JSON 的 `candidate_index` 是 0、1、2。界面编号是 1、2、3。给出推荐时 `lastPick` 记第 1 个。
+5. JSON 的 `candidate_index` 是 0、1、2 或 null（null 按 0，即编号 1）。界面编号是 1、2、3。给出推荐时 `lastPick` 记展示的第 1 个。编号卡在 `couponTable` 有行时渲染「券折算」（券名、适用、可省、折后）。
 
 6. 生成的链接只有 `#b64.<base64url>`。卡片页仍能解开旧的裸 `#v1~`。
 
 7. `--fake-llm` 只在传入该参数时动态加载 `tests/fake-llm.mjs`。`MCD_TEST_ZERO=1` 在资格门之前塞入 ¥0 候选。`MCD_TEST_ORDER_FAIL=1` 让演示模式在答「是」之后记一笔失败，这样真 PTY 能看到「创建」走重试。演示模式本身不调用 `create-order`。幂等（原因含「已存在」或「重复」）不自动再下单，也不调用 `query-order`，只提示先查订单。
 
-8. `calculate_price` 的 schema 有 `couponIds`，`toolToMcp` 不把它们传给 MCP。核价参数只有 `storeCode`、`orderType`、`beType`、`items`。
+8. `calculate_price` 的 schema 没有 `couponIds`，只有 `storeCode` 和 `items`。`toolToMcp` 传给 MCP 的核价参数只有 `storeCode`、`orderType`、`beType`、`items`。
 
-9. 口味只在本次会话（`session.taste`）。档案文件只有过敏原。`profileSummary` 只写「有忌口（详情本地）」。系统提示里有「过敏」这个类别词，没有具体过敏原。单测审计的是具体过敏词。
+9. 口味只在本次会话（`session.taste`），不进档案。档案文件只有过敏原。`profileSummary` 写偏好、预算、常点；有过敏时只追加「有忌口（详情本地）」，不写具体过敏原。`register_allergy` 不落盘，只提示用 `/allergy` 加名称。系统提示里有「过敏」这个类别词，没有具体过敏原。单测审计的是具体过敏词。
 
 10. `session.random` 保留给用户主动触发的盲盒。随机小票（`maybeReceipt` / `shouldPrintReceipt` / 「随手掉落」）已去掉。
 
@@ -42,4 +42,4 @@
 
 20. `validateRequest` 不再因为人数不在 1–4 或饱腹不在 5/7/9 而抛错。TUI 固定 `people: 1`。`portion` 为空表示不按饱腹过滤。
 
-21. 门店选定后的预取最多 8 个主食，失败记 `unknown: true`、`complete: false`。`session.quote` 还会用候选组成填一份 `complete: false` 的缓存。
+21. 配料预取是 `prefetchCandidateDetails`：只对排好的候选（最多 4 个）拉 `orderItems` 的 `productCode`，不把候选合成 id 当作 `query-meal-detail` 的 code。失败记 `unknown: true`、`complete: false`。`session.quote` 仍会按候选 id 填一份 `complete: false` 的组成缓存；问配料时按 productCode 匹配，并优先非 unknown 的详情。`quote()` 把调用方的 `signal` 传进 `prepareWheel`、`liveAlaCarte`、`liveMenuPlans`，再进 `inspectBenefits` / `quoteBest` / `menuItemCart` 的 `client.call(..., { signal })`。取消只中止这次调用，不改变 429/502/503/504 的重试。

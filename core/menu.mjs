@@ -60,31 +60,17 @@ export function parseDetail(detail, meal = {}) {
   };
 }
 
-export async function prefetchDetails(client, common, items, { limit = 8 } = {}) {
-  const pool = shortlistMeals(items, limit);
-  const cache = {};
-  await Promise.all(pool.map(async (meal) => {
-    try {
-      const data = detailOf((await client.call('query-meal-detail', { ...common, code: meal.code })).data, meal.code);
-      if (!data) cache[meal.code] = { code: meal.code, name: meal.name, parts: [], removable: [], meatKind: meatsInName(meal.name), complete: false, unknown: true };
-      else cache[meal.code] = parseDetail(data, meal);
-    } catch {
-      cache[meal.code] = { code: meal.code, name: meal.name, parts: [], removable: [], meatKind: meatsInName(meal.name), complete: false, unknown: true };
-    }
-  }));
-  return cache;
-}
-
 // Ingredient prefetch for the meals the user actually sees: the ranked candidates'
-// orderItems product codes, cached by code. Replaces menu-wide prefetching, which
-// fetched unrelated items and could answer "有什么料" with the wrong meal.
+// orderItems product codes, cached by code. cand.id is a template id, not a productCode.
+// Replaces menu-wide prefetching, which fetched unrelated items and could answer
+// "有什么料" with the wrong meal.
 export async function prefetchCandidateDetails(client, common, candidates, { limit = 4, signal } = {}) {
   const cache = {};
   const seen = new Set();
   const jobs = [];
   for (const cand of (candidates || []).slice(0, limit)) {
     if (!cand) continue;
-    const codes = [...new Set([cand.id, ...(cand.orderItems || []).map((i) => i?.productCode)].filter(Boolean))];
+    const codes = [...new Set((cand.orderItems || []).map((i) => i?.productCode).filter(Boolean))];
     for (const code of codes) {
       if (seen.has(code)) continue;
       seen.add(code);

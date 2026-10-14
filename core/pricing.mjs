@@ -7,6 +7,9 @@ const positive = (v) => Number.isSafeInteger(v) && v > 0;
 const amount = (v) => Number.isSafeInteger(v) && v >= 0;
 const clone = (v) => structuredClone(v);
 const pick = (v, keys) => Object.fromEntries(keys.filter((k) => k in v).map((k) => [k, v[k]]));
+// Cancellation is not a business failure. Callers that swallow errors must let it out
+// so an external abort does not keep pricing the rest of the list.
+const stopIfAborted = (signal, error) => { if (signal?.aborted) throw error; };
 
 export function dateValue(value, end = false) {
   requireValue(typeof value === 'string' && value.trim(), '有效期未确认');
@@ -114,10 +117,10 @@ export function publicOffers(raw) {
     if (seen.has(key)) return false; seen.add(key); return true;
   }).map((o) => ({ name: o.couponName, status: o.couponStatus, label: o.label, canClaim: o.couponStatus === 'CAN_GET', priceUse: 'requires-claim-store-validation-and-live-quote' }));
 }
-export async function wallet(client) {
+export async function wallet(client, { signal } = {}) {
   const assets = new Map(); let complete = false;
   for (let page = 1; page <= 5; page++) {
-    const data = (await client.call('query-my-coupons', { page: String(page), pageSize: '200' })).data;
+    const data = (await client.call('query-my-coupons', { page: String(page), pageSize: '200' }, { signal })).data;
     requireValue(data.currentPage === page && Array.isArray(data.coupons) && amount(data.totalCount) && amount(data.totalPages), '券包分页未确认');
     for (const c of data.coupons) { requireValue(c.id, '持有券缺少资产编号'); assets.set(c.id, c); }
     if (page >= data.totalPages) { complete = assets.size >= data.totalCount; break; }
@@ -204,18 +207,18 @@ function benefitRows(offers, owned, store, usable, skipped, entries, calendarCom
   if (!calendarComplete) rows.push({ kind: 'source-error', name: '活动日历', status: 'unknown', scope: '未查全', condition: '本次展示最低已核验价', priceUse: 'not-in-price' });
   return rows;
 }
-export async function inspectBenefits(client, context, onProgress = () => {}) {
+export async function inspectBenefits(client, context, onProgress = () => {}, { signal } = {}) {
   onProgress({ step: 0, text: '正在查可领券、券包和门店范围…' });
-  const now = dateValue((await client.call('now-time-info')).data.datetime);
-  const offers = publicOffers((await client.call('available-coupons')).data);
-  const { owned, complete } = await wallet(client);
-  const store = (await client.call('query-store-coupons', pick(context, ['storeCode', 'orderType', 'beType']))).data;
+  const now = dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
+  const offers = publicOffers((await client.call('available-coupons', {}, { signal })).data);
+  const { owned, complete } = await wallet(client, { signal });
+  const store = (await client.call('query-store-coupons', pick(context, ['storeCode', 'orderType', 'beType']), { signal })).data;
   requireValue(Array.isArray(store), '门店优惠范围未确认');
   const initial = eligibleCoupons(owned, store, now);
   onProgress({ step: 1, text: '正在核实活动、有效期和用券时段…' });
   let calendar = {}, calendarComplete = true;
-  try { calendar = (await client.call('campaign-calendar', { specifiedDate: chinaDate(now) })).data; }
-  catch { calendarComplete = false; }
+  try { calendar = (await client.call('campaign-calendar', { specifiedDate: chinaDate(now) }, { signal })).data; }
+  catch (e) { stopIfAborted(signal, e); calendarComplete = false; }
   const constrained = constrainCoupons(initial.eligible, calendar, now), entries = publicCalendar(calendar, now);
   return { now, offers, ownedCount: owned.length, storeCount: store.length, walletComplete: complete, calendarComplete,
     usable: constrained.eligible, cutoffs: constrained.cutoffs, entries,
@@ -244,17 +247,17 @@ export function couponVariants(items, coupons, limit = 64) {
 // calculate-price data.takeWayList → [{ code, title }]; entries without a string code are dropped.
 export const takeWaysOf = (data) => (Array.isArray(data?.takeWayList) ? data.takeWayList : [])
   .filter((t) => t && typeof t.code === 'string' && t.code).map((t) => ({ code: t.code, title: typeof t.title === 'string' ? t.title : '' }));
-export async function quoteBest(client, common, items, coupons, limit = 64) {
+export async function quoteBest(client, common, items, coupons, limit = 64, { signal } = {}) {
   const { variants, truncated } = couponVariants(items, coupons, limit);
-  const baseline = await client.call('calculate-price', { ...common, items: variants[0] });
+  const baseline = await client.call('calculate-price', { ...common, items: variants[0] }, { signal });
   requireValue(amount(baseline.data?.price), '官方基础报价无效');
   let best = baseline, bestCart = variants[0], successes = 0, failures = 0;
   for (const cart of variants.slice(1)) {
     try {
-      const quoted = await client.call('calculate-price', { ...common, items: cart });
+      const quoted = await client.call('calculate-price', { ...common, items: cart }, { signal });
       requireValue(amount(quoted.data?.price), '官方用券报价无效'); successes++;
       if (quoted.data.price < best.data.price) { best = quoted; bestCart = cart; }
-    } catch { failures++; }
+    } catch (e) { stopIfAborted(signal, e); failures++; }
   }
   const names = new Map(coupons.map((c) => [c.couponId, c.name]));
   requireValue(Number.isFinite(dateValue(best.datetime)), '官方报价缺少时间');
@@ -319,9 +322,10 @@ export function detailOf(data, code) {
   return { ...d, code: codeOf(d.code) ?? code };
 }
 // A whole-cart item for any menu product: a package with rounds takes its default choices; anything else is a plain item.
-export async function menuItemCart(client, common, code, quantity, name = '') {
+export async function menuItemCart(client, common, code, quantity, name = '', { signal } = {}) {
   let detail = null;
-  try { detail = detailOf((await client.call('query-meal-detail', { ...common, code })).data, code); } catch { /* priced as a plain item */ }
+  try { detail = detailOf((await client.call('query-meal-detail', { ...common, code }, { signal })).data, code); }
+  catch (e) { stopIfAborted(signal, e); /* priced as a plain item */ }
   if (detail?.rounds?.length) {
     const [item, parts] = buildPackage(detail, { productCode: code, quantity, choices: {} });
     return { items: [item], parts, name: detail.name || name };
@@ -338,15 +342,16 @@ function templateFailure(recipe, codeStatus, names, error) {
   return { cause: 'structure', reason: `套餐搭配和模板不一致：${error?.message || '结构不符'}` };
 }
 
-export async function prepareWheel(client, templates, context, request, onProgress = () => {}, { names = new Map() } = {}) {
+export async function prepareWheel(client, templates, context, request, onProgress = () => {}, { names = new Map(), signal } = {}) {
   validateRequest(request); requireValue(context.storeCode && context.beType === 1 && context.orderType === 1, '请先选择到店取餐门店。');
   const recipes = templates.recipes.filter((r) => r.people === request.people && (request.portion == null || r.portion === request.portion));
   requireValue(recipes.length, request.portion == null ? '暂时没有此人数的餐单。' : '暂时没有此人数和食量的餐单。');
-  const benefits = await inspectBenefits(client, context, onProgress), common = pick(context, ['storeCode', 'orderType', 'beType']);
+  const benefits = await inspectBenefits(client, context, onProgress, { signal }), common = pick(context, ['storeCode', 'orderType', 'beType']);
   onProgress({ step: 2, text: '正在读取当前门店的套餐和搭配…', benefits });
   // A failed or odd menu read no longer aborts: every template still tries query-meal-detail, and each failure says why.
   let rawMenu = null, menuError = '';
-  try { rawMenu = (await client.call('query-meals', common)).data; } catch (e) { menuError = e?.message || '门店菜单未返回'; }
+  try { rawMenu = (await client.call('query-meals', common, { signal })).data; }
+  catch (e) { stopIfAborted(signal, e); menuError = e?.message || '门店菜单未返回'; }
   const index = menuIndex(rawMenu), menuOk = !menuError && index.size > 0;
   if (!menuError && !index.size) menuError = `门店菜单为空或无法识别（${menuShape(rawMenu)}）`;
   const codes = [...new Set(recipes.flatMap((r) => r.ingredients.map((i) => i.productCode)))], details = {}, codeStatus = new Map();
@@ -354,9 +359,9 @@ export async function prepareWheel(client, templates, context, request, onProgre
     const { code: storeCode, how } = resolveCode(code, index, names), status = { storeCode, how, menuOk, detail: 'empty' };
     codeStatus.set(code, status);
     try {
-      const detail = detailOf((await client.call('query-meal-detail', { ...common, code: storeCode })).data, storeCode);
+      const detail = detailOf((await client.call('query-meal-detail', { ...common, code: storeCode }, { signal })).data, storeCode);
       if (detail?.rounds?.length) { details[code] = detail; status.detail = 'ok'; }
-    } catch (e) { status.detail = 'error'; status.error = e?.message || '未返回'; }
+    } catch (e) { stopIfAborted(signal, e); status.detail = 'error'; status.error = e?.message || '未返回'; }
   });
   const mainCodes = new Set(templates.mainProductCodes), avoid = new Set(request.avoidMainCodes), failed = [], excluded = [], ready = [];
   for (const recipe of recipes) {
@@ -373,7 +378,7 @@ export async function prepareWheel(client, templates, context, request, onProgre
   onProgress({ step: 3, text: `正在比较整单价格（0 / ${ready.length}）…`, benefits });
   const results = await mapLimited(ready, async ({ recipe, cart }) => {
     try {
-      const quote = await quoteBest(client, common, cart.items, benefits.usable);
+      const quote = await quoteBest(client, common, cart.items, benefits.usable, 64, { signal });
       // The report must not carry account-private coupon identifiers (couponId/couponCode):
       // orderItems are for create-order, and the buy flow re-prices (quoteBest directly)
       // to get fresh ones with coupons before ordering. Strip them here; the plan keeps
@@ -381,7 +386,7 @@ export async function prepareWheel(client, templates, context, request, onProgre
       const orderItems = (quote.orderItems || []).map(({ couponId, couponCode, ...rest }) => ({ ...rest }));
       return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote, orderItems,
         packages: cart.packages, parts: cart.parts, mainCodes: cart.mainCodes, withinBudget: quote.priceFen <= request.people * request.budgetPerPersonFen };
-    } catch (e) { return { id: recipe.id, title: recipe.title, cause: 'api', reason: `整单核价（calculate-price）失败：${e?.message || '未返回'}` }; }
+    } catch (e) { stopIfAborted(signal, e); return { id: recipe.id, title: recipe.title, cause: 'api', reason: `整单核价（calculate-price）失败：${e?.message || '未返回'}` }; }
     finally { done++; onProgress({ step: 3, text: `正在比较整单价格（${done} / ${ready.length}）…`, benefits }); }
   });
   const quoted = results.filter((r) => 'priceFen' in r).sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
@@ -389,7 +394,7 @@ export async function prepareWheel(client, templates, context, request, onProgre
   const complete = benefits.walletComplete && benefits.calendarComplete && !failed.length && quoted.every((p) => p.comparisonComplete);
   quoted.forEach((p) => { p.priceLabel = complete ? '候选范围内最低核价' : '最低已核验价'; });
   const expiry = Math.min(benefits.now + 300000, ...quoted.map((p) => dateValue(p.quotedAt) + 300000), ...benefits.usable.map((c) => c.expiresAt), ...benefits.cutoffs);
-  const completed = dateValue((await client.call('now-time-info')).data.datetime);
+  const completed = dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
   const validForSeconds = Math.max(0, Math.floor((expiry - completed) / 1000));
   const candidates = quoted.filter((p) => p.withinBudget);
   return { schemaVersion: 1, sourceKind: 'official-live-pre-wheel-pricing', context: { ...context }, request: { ...request, totalBudgetFen: request.people * request.budgetPerPersonFen },

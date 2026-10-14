@@ -320,7 +320,11 @@ test('info_ingredients never answers with an unrelated cached meal', async () =>
 test('prefetchCandidateDetails fetches the candidates own codes', async () => {
   const { prefetchCandidateDetails } = await import('../core/menu.mjs');
   const seen = [];
-  const client = { async call(name, args) { seen.push(args.code); return { data: { code: args.code, name: `餐${args.code}` } }; } };
+  const client = { async call(name, args) {
+    assert.equal(name, 'query-meal-detail');
+    seen.push(args.code);
+    return { data: { code: args.code, name: `餐${args.code}` } };
+  } };
   const candidates = [
     { id: 'c1', title: '套餐1', orderItems: [{ productCode: 'P1' }, { productCode: 'P2' }] },
     { id: 'c2', title: '套餐2', orderItems: [{ productCode: 'P1' }] },
@@ -329,6 +333,44 @@ test('prefetchCandidateDetails fetches the candidates own codes', async () => {
   assert.ok(cache.P1 && cache.P2, 'candidate product codes fetched');
   assert.equal(new Set(seen).size, seen.length, 'no duplicate fetches');
   assert(!seen.includes('UNRELATED'), 'menu-wide items are not fetched');
+  assert(!seen.includes('c1') && !seen.includes('c2'), 'synthetic candidate ids are not query-meal-detail codes');
+});
+
+test('infoFromCache prefers a known productCode detail over the synthetic id and an unknown entry', () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true });
+  session.lastPick = { id: 'c1', title: 'A餐', parts: [], orderItems: [{ productCode: 'P1' }] };
+  session.detailCache = {
+    synth: { code: 'c1', name: 'A餐', parts: [], removable: ['合成酱'], meatKind: [], complete: false, unknown: false },
+    bad: { code: 'P1', name: 'A餐', parts: [], removable: ['失败酱'], meatKind: [], complete: false, unknown: true },
+    good: { code: 'P1', name: 'A餐', parts: [], removable: ['生菜'], meatKind: [], complete: true, unknown: false },
+  };
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => null, message: (e) => e.message });
+  exec.infoFromCache('info_ingredients');
+  assert.match(out.text(), /生菜/);
+  assert.doesNotMatch(out.text(), /合成酱|失败酱/);
+});
+
+test('quote pricing forwards signal and does not swallow an abort', async () => {
+  const { prepareWheel } = await import('../core/pricing.mjs');
+  const { liveAlaCarte } = await import('../tui/pricing.mjs');
+  const { liveMenuPlans } = await import('../tui/menu.mjs');
+  const context = { storeCode: 'S', orderType: 1, beType: 1 };
+  const request = { people: 1, budgetPerPersonFen: 3000, avoidMainCodes: [] };
+  const signal = AbortSignal.abort();
+  const seen = [];
+  const client = { async call(name, _args, opts) { seen.push({ name, signal: opts?.signal }); throw new Error('已取消。'); } };
+  await assert.rejects(() => prepareWheel(client, { recipes: [{ id: 'r', people: 1, title: '套餐', ingredients: [] }], mainProductCodes: [] }, context, request, () => {}, { signal }));
+  assert.equal(seen[0].name, 'now-time-info');
+  assert.equal(seen[0].signal, signal);
+  seen.length = 0;
+  await assert.rejects(() => liveAlaCarte(client, context, [{ code: 'P1', name: '巨无霸' }], request, [], () => {}, { signal }));
+  assert.equal(seen[0].name, 'query-meal-detail');
+  assert.equal(seen[0].signal, signal);
+  seen.length = 0;
+  await assert.rejects(() => liveMenuPlans(client, context, [{ code: 'P1', name: '巨无霸' }], request, [], new Set(), () => {}, { signal }));
+  assert.equal(seen[0].name, 'query-meal-detail');
+  assert.equal(seen[0].signal, signal);
 });
 
 // Fix #5: the numbered card renders the coupon value table.
