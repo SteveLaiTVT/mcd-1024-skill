@@ -411,7 +411,9 @@ export async function prepareWheel(client, templates, context, request, onProgre
   const complete = !partial && benefits.walletComplete && benefits.calendarComplete && !failed.length && quoted.every((p) => p.comparisonComplete);
   quoted.forEach((p) => { p.priceLabel = complete ? '候选范围内最低核价' : '最低已核验价'; });
   const expiry = Math.min(benefits.now + 300000, ...quoted.map((p) => dateValue(p.quotedAt) + 300000), ...benefits.usable.map((c) => c.expiresAt), ...benefits.cutoffs);
-  // Partial: the signal is dead, so another now-time-info would throw '已取消' — reuse the benefits timestamp.
+  // Partial (or the signal died after the loop): the signal is dead, so another now-time-info
+  // would throw '已取消' — reuse the benefits timestamp and mark partial.
+  if (signal?.aborted) partial = true;
   const completedAt = partial ? benefits.now : dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
   const validForSeconds = Math.max(0, Math.floor((expiry - completedAt) / 1000));
   const candidates = quoted.filter((p) => p.withinBudget);
