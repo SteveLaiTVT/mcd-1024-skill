@@ -59,10 +59,10 @@ export function createExecutor({ session, ui, ask, message }) {
     session.lastDetails = { query, lines };
   }
 
-  async function ensureQuoted(signal) {
+  async function ensureQuoted(signal, opts = {}) {
     if (session.report?.candidates?.length && session.fresh()) return session.report;
     if (!session.store && session.demo) return null;
-    return session.quote((p) => p?.text && ui.write(P.gray(p.text)), { signal });
+    return session.quote((p) => p?.text && ui.write(P.gray(p.text)), { signal, ...opts });
   }
 
   // Budget from the model only ever applies to (re)picking, and only when it actually
@@ -74,15 +74,18 @@ export function createExecutor({ session, ui, ask, message }) {
     if (fen !== session.request.budgetPerPersonFen) session.setProfile({ budgetPerPersonFen: fen });
   }
 
-  async function recommend({ local = false, query = '', budget, signal, localNote = '' } = {}) {
+  async function recommend({ local = false, query = '', budget, signal, localNote = '', want = null } = {}) {
     applyBudget(budget);
+    // The current turn's explicit want ("想吃牛肉汉堡") outranks history: turn it
+    // into meat kinds so the ranking prefers it even when a cheaper rival exists.
+    const wantMeats = want ? meatsInName(want) : [];
     const step = ui.begin(local ? '本地编号（按券后价）' : '为你挑选这一餐');
     try {
       step.progress('核价候选…');
-      const report = await ensureQuoted(signal);
+      const report = await ensureQuoted(signal, { wantMeats });
       step.done();
       const pool = report?.candidates || [];
-      const { ranked, skipped, emptyLine } = rankCandidates(pool, { taste: session.taste, budgetFen: session.request.budgetPerPersonFen });
+      const { ranked, skipped, emptyLine } = rankCandidates(pool, { taste: session.taste, budgetFen: session.request.budgetPerPersonFen, wantMeats });
       if (!ranked.length) {
         ui.panel('没有能点的餐', [emptyLine || allOut(skipped.length), ...skipped.map((s) => s.line)], 'yellow');
         session.lastDetails = { query, lines: [emptyLine, ...skipped.map((s) => s.line)] };
@@ -100,28 +103,48 @@ export function createExecutor({ session, ui, ask, message }) {
     return plan;
   }
 
-  function infoFromCache(kind, { meat = '牛肉' } = {}) {
+  function infoFromCache(kind, { meat = '牛肉', item = null } = {}) {
     const pick = session.lastPick;
     const cache = Object.values(session.detailCache || {});
-    // Match the picked meal by orderItems productCode only. pick.id is a template id,
-    // not a productCode. Prefer a real detail over an unknown placeholder, and never
-    // an unrelated cached entry: answering "有什么料" with another meal is worse than saying so.
-    const codes = new Set((pick?.orderItems || []).map((i) => i?.productCode).filter(Boolean));
-    const cached = pick ? cache.find((d) => d && codes.has(d.code) && !d.unknown) || cache.find((d) => d && codes.has(d.code)) || null : null;
-    const names = [...(pick?.parts || []).map((p) => p.name), ...(cached?.parts || []).map((p) => p.name), pick?.title].filter(Boolean);
-    if (!pick && !cached) return ui.info('没查到。这轮上下文里没有这份餐的配料。');
+    const matchName = (name, norm) => name && (name === norm || name.includes(norm) || norm.includes(name));
+    // A named item ("双层吉士汉堡有什么料呢") must be answered from that item's own
+    // cached detail, never from an unrelated lastPick. Fall back to the menu when the
+    // detail was never prefetched; be honest when nothing matches.
+    let subject = null, missName = null;
+    if (item && String(item).trim()) {
+      const norm = String(item).trim();
+      const hit = cache.find((d) => matchName(d?.name, norm));
+      if (hit) subject = { title: hit.name, parts: hit.parts || [], cached: hit };
+      else {
+        const menuItems = session.menu?.items || session.menuSnapshot || [];
+        const inMenu = menuItems.find((m) => matchName(m?.name, norm));
+        if (inMenu) subject = { title: inMenu.name, parts: [], cached: null };
+        else missName = norm;
+      }
+    } else {
+      // Match the picked meal by orderItems productCode only. pick.id is a template id,
+      // not a productCode. Prefer a real detail over an unknown placeholder, and never
+      // an unrelated cached entry: answering "有什么料" with another meal is worse than saying so.
+      const codes = new Set((pick?.orderItems || []).map((i) => i?.productCode).filter(Boolean));
+      const cached = pick ? cache.find((d) => d && codes.has(d.code) && !d.unknown) || cache.find((d) => d && codes.has(d.code)) || null : null;
+      if (pick || cached) subject = { title: pick?.title || cached?.name, parts: pick?.parts || cached?.parts || [], cached };
+    }
+    if (missName) return ui.info(`没查到「${missName}」：这家店的菜单和已缓存的详情里都没有它，不编。`);
+    if (!subject) return ui.info('没查到。这轮上下文里没有这份餐的信息。');
+    const { title, parts, cached } = subject;
+    const names = [...(parts || []).map((p) => p.name), ...(cached?.parts || []).map((p) => p.name), title].filter(Boolean);
     if (kind === 'info_meat') {
       const answer = answerMeat({ names, meat });
       ui.panel('肉类', renderInfoAnswer(answer, P));
       return;
     }
     if (kind === 'info_parts') {
-      const answer = answerParts({ name: pick?.title || cached?.name, parts: pick?.parts || cached?.parts || [] });
+      const answer = answerParts({ name: title, parts: parts || [] });
       ui.panel('组成', renderInfoAnswer(answer, P, { storeName: session.store?.storeName || '' }));
       return;
     }
-    if (!cached) return ui.info(`没查到「${pick?.title || ''}」的配料：接口没有返回这份餐的详情，不编。`);
-    const answer = answerIngredients({ name: pick?.title || cached?.name || '', detail: { name: cached.name, extras: cached.removable || [], rounds: [] }, parts: pick?.parts || [], names });
+    if (!cached) return ui.info(`没查到「${title || ''}」的配料：接口没有返回这份餐的详情，不编。`);
+    const answer = answerIngredients({ name: title || cached?.name || '', detail: { name: cached.name, extras: cached.removable || [], rounds: [] }, parts: parts || [], names });
     const lines = renderInfoAnswer(answer, P);
     if (!cached?.complete) lines.push(P.gray('不是完整配料表：接口只给了可去掉的料和组成，没有完整配料表。'));
     if (cached?.unknown) lines.unshift('配料未知');
@@ -203,7 +226,7 @@ export function createExecutor({ session, ui, ask, message }) {
       return recommend({ local: true, query, signal, localNote: `${intent.errorMessage || '模型暂不可用'}（本地模式）` });
     }
     switch (intent?.kind) {
-      case 'recommend': return recommend({ query, budget: intent.slots?.budget_yuan, signal });
+      case 'recommend': return recommend({ query, budget: intent.slots?.budget_yuan, signal, want: intent.slots?.want });
       case 'blindbox': {
         applyBudget(intent.slots?.budget_yuan);
         await ensureQuoted(signal);
@@ -219,9 +242,9 @@ export function createExecutor({ session, ui, ask, message }) {
       }
       case 'confirm_pick': return runBuyFlow();
       case 'retry_order': return retry();
-      case 'info_meat': return infoFromCache('info_meat', { meat: intent.slots?.want && meatsInName(intent.slots.want)[0] || '牛肉' });
-      case 'info_parts': return infoFromCache('info_parts');
-      case 'info_ingredients': return infoFromCache('info_ingredients');
+      case 'info_meat': return infoFromCache('info_meat', { meat: intent.slots?.want && meatsInName(intent.slots.want)[0] || '牛肉', item: intent.slots?.item });
+      case 'info_parts': return infoFromCache('info_parts', { item: intent.slots?.item });
+      case 'info_ingredients': return infoFromCache('info_ingredients', { item: intent.slots?.item });
       case 'price_ask': {
         const plan = session.lastPick || session.ranked?.[0];
         if (!plan) return ui.info('不知道，这轮还没有核过价。');

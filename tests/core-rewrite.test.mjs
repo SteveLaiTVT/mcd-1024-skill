@@ -19,7 +19,7 @@ import { valueCoupons } from '../core/coupons.mjs';
 import { buildTurnContext } from '../core/context.mjs';
 import { stripAllergyText } from '../core/memory.mjs';
 import { canRetry, recordAttempt, classifyFailure, retryOrder, RETRY_PHRASE } from '../core/order.mjs';
-import { createFakeLlm } from './fake-llm.mjs';
+import { createFakeLlm, intentFor } from './fake-llm.mjs';
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
 const [templates, plans, offers, campaigns] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns'].map(json));
@@ -35,7 +35,7 @@ function uiOf(out = sink()) {
 }
 const intent = (kind, slots = {}) => ({
   kind, candidate_index: null, ref: null,
-  slots: { budget_yuan: null, want: null, store_kw: null, ...slots }, answer: null,
+  slots: { budget_yuan: null, want: null, store_kw: null, item: null, ...slots }, answer: null,
 });
 
 test('tool schemas are read-only: claim and create-order are not callable by the model', () => {
@@ -87,7 +87,7 @@ test('hub: a tool round then a JSON answer; invalid JSON degrades to unknown', a
 
 test('hub validation failure is an honest 没理解, not a new pick', async () => {
   const session = new TuiSession({ dataset, env: {}, demo: true, llm: { async chat() {
-    return { json: { kind: 'order', candidate_index: null, ref: null, slots: { budget_yuan: null, want: null, store_kw: null }, answer: null }, toolCalls: [], content: '', message: { role: 'assistant', content: '' } };
+    return { json: { kind: 'order', candidate_index: null, ref: null, slots: { budget_yuan: null, want: null, store_kw: null, item: null }, answer: null }, toolCalls: [], content: '', message: { role: 'assistant', content: '' } };
   } } });
   const { out, ui } = uiOf();
   const exec = createExecutor({ session, ui, ask: async () => '不是', message: (e) => e.message });
@@ -210,6 +210,73 @@ test('numbered candidates follow taste, and a blind box stays in budget and elig
     assert.notEqual(drawn.plan.id, 'z');
     assert.notEqual(drawn.plan.id, 'd');
   }
+});
+
+test('reRank: the current turn want outranks history and price', () => {
+  const beef = { id: 'b', title: '双层吉士汉堡', priceFen: 2000, parts: [{ name: '双层吉士汉堡', quantity: 1 }] };
+  const chicken = { id: 'c', title: '麦香鸡', priceFen: 1390, parts: [{ name: '麦香鸡', quantity: 1 }] };
+  const meatOf = (n) => n.includes('吉士') ? ['牛肉'] : n.includes('鸡') ? ['鸡肉'] : [];
+  // New user, no taste: without want the cheaper chicken wins (the old bug).
+  assert.equal(reRank([chicken, beef], { meatOf })[0].id, 'c');
+  // want=牛肉 (+3) puts the beef first even though the chicken is cheaper.
+  assert.equal(reRank([chicken, beef], { meatOf, wantMeats: ['牛肉'] })[0].id, 'b');
+  // The current turn want (+3) beats a history taste (+2) pointing the other way.
+  const ranked = reRank([chicken, beef], { taste: { meats: ['鸡肉'], likes: [], less: [] }, meatOf, wantMeats: ['牛肉'] });
+  assert.equal(ranked[0].id, 'b');
+});
+
+test('hub: info intents carry the named item slot', async () => {
+  const { validateHubIntent } = await import('../core/hub.mjs');
+  const v = validateHubIntent({ kind: 'info_ingredients', candidate_index: null, ref: null, slots: { budget_yuan: null, want: null, store_kw: null, item: '双层吉士汉堡' }, answer: null });
+  assert.equal(v.slots.item, '双层吉士汉堡');
+  // The old 3-key shape no longer validates.
+  assert.equal(validateHubIntent({ kind: 'info_ingredients', candidate_index: null, ref: null, slots: { budget_yuan: null, want: null, store_kw: null }, answer: null }), null);
+});
+
+test('fake-llm extracts a named item for info intents; a deictic falls back to lastPick', () => {
+  const named = intentFor('本轮：双层吉士汉堡有什么料呢');
+  assert.equal(named.kind, 'info_ingredients');
+  assert.equal(named.slots.item, '双层吉士汉堡');
+  assert.equal(named.ref, null);
+  const deictic = intentFor('本轮：这个有什么料呢');
+  assert.equal(deictic.kind, 'info_ingredients');
+  assert.equal(deictic.slots.item, null);
+  assert.equal(deictic.ref, 'lastPick');
+  const parts = intentFor('本轮：双层吉士随心配里有什么');
+  assert.equal(parts.kind, 'info_parts');
+  assert.equal(parts.slots.item, '双层吉士随心配');
+  const meat = intentFor('本轮：双层吉士汉堡有牛肉吗');
+  assert.equal(meat.kind, 'info_meat');
+  assert.equal(meat.slots.item, '双层吉士汉堡');
+  assert.equal(meat.slots.want, '牛肉');
+});
+
+test('指名问配料答的是指名餐品，不是上一餐', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true, llm: createFakeLlm() });
+  session.lastPick = { title: '麦香鸡', priceFen: 1390, parts: [], orderItems: [{ productCode: 'C1' }] };
+  session.detailCache = {
+    C1: { code: 'C1', name: '麦香鸡', parts: [], removable: [], complete: false, unknown: true },
+    B1: { code: 'B1', name: '双层吉士汉堡', parts: [{ name: '双层吉士汉堡', qty: 1 }], removable: ['吉士', '酸黄瓜'], complete: false, unknown: false },
+  };
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => '不是', message: (e) => e.message });
+  await exec.handleText('双层吉士汉堡有什么料呢');
+  const text = out.text();
+  assert.match(text, /双层吉士汉堡/);
+  assert.match(text, /吉士/);
+  assert.doesNotMatch(text, /配料未知/);
+  assert.doesNotMatch(text, /麦香鸡/);
+});
+
+test('指名问配料但菜单和缓存都没有时诚实说没查到', async () => {
+  const session = new TuiSession({ dataset, env: {}, demo: true, llm: createFakeLlm() });
+  session.lastPick = { title: '麦香鸡', priceFen: 1390, parts: [], orderItems: [] };
+  session.detailCache = {};
+  session.menu = { storeCode: 'S', items: [{ code: 'C1', name: '麦香鸡', priceFen: 1390 }], shape: '' };
+  const { out, ui } = uiOf();
+  const exec = createExecutor({ session, ui, ask: async () => '不是', message: (e) => e.message });
+  await exec.handleText('巨无霸有什么料呢');
+  assert.match(out.text(), /没查到「巨无霸」/);
 });
 
 test('「创建」retries a failed order and does not pick again; the 4th retry and an unclear failure do not', async () => {

@@ -72,7 +72,7 @@ function sink() { const chunks = []; return { chunks, columns: 100, isTTY: false
 
 test('intent regexes are gone; the hub rejects a JSON object with extra keys', async () => {
   const { validateHubIntent } = await import('../core/hub.mjs');
-  const ok = { kind: 'recommend', candidate_index: null, ref: null, slots: { budget_yuan: 30, want: null, store_kw: null }, answer: null };
+  const ok = { kind: 'recommend', candidate_index: null, ref: null, slots: { budget_yuan: 30, want: null, store_kw: null, item: null }, answer: null };
   assert.equal(validateHubIntent(ok).kind, 'recommend');
   assert.equal(validateHubIntent({ ...ok, extra: 1 }), null);
   assert.equal(validateHubIntent({ ...ok, kind: 'order' }), null);

@@ -258,7 +258,7 @@ export class TuiSession {
     return { orderId, known, ...status };
   }
 
-  async quote(onProgress = () => {}, { signal } = {}) {
+  async quote(onProgress = () => {}, { signal, wantMeats } = {}) {
     const context = this.requireStore(), request = { ...this.request, avoidMainCodes: [...this.request.avoidMainCodes], wantMainCodes: [...(this.request.wantMainCodes || [])] };
     this.invalidate();
     if (!this.demo) this.benefits = null;
@@ -318,7 +318,7 @@ export class TuiSession {
     }
     const gated = applyGate(report.candidates);
     report.eligibilitySkipped = gated.skipped;
-    report.candidates = reRank(gated.kept, { taste: this.taste, meatOf: meatsInName });
+    report.candidates = reRank(gated.kept, { taste: this.taste, meatOf: meatsInName, wantMeats });
     report.counts = { ...report.counts, quotedPlans: report.quotedPlans.length, wheelCandidates: report.candidates.length };
     this.menuSnapshot = (this.menu?.items || report.menu?.items || []).slice(0, 40).map((m) => ({ code: m.code || m.productCode, name: m.name, priceFen: m.priceFen ?? null }));
     for (const p of report.candidates.slice(0, 8)) {

@@ -32,14 +32,18 @@ export function profileSummary({ taste = emptyTaste(), hasAllergy = false } = {}
 }
 
 // Preference points, then coupon price. Allergy conflicts are removed by the caller before this runs.
-export function reRank(candidates, { taste = emptyTaste(), meatOf = () => [] } = {}) {
+// wantMeats is the current turn's explicit want ("想吃牛肉汉堡"): +3, above the
+// history taste's +2, because what the user just said outranks what they liked before.
+export function reRank(candidates, { taste = emptyTaste(), meatOf = () => [], wantMeats = [] } = {}) {
   const liked = new Set((taste.likes || []).map((x) => x.code || x.name || x));
   const less = new Set((taste.less || []).map((x) => x.code || x.name || x));
   const meats = new Set(taste.meats || []);
+  const wanted = new Set(wantMeats || []);
   const scored = candidates.map((c) => {
     const names = [c.title, ...(c.parts || []).map((p) => p.name)].filter(Boolean);
     const kinds = new Set(names.flatMap((n) => meatOf(n)));
     let score = 0;
+    if ([...wanted].some((m) => kinds.has(m))) score += 3;
     if ([...meats].some((m) => kinds.has(m))) score += 2;
     const codes = [c.id, ...(c.mainCodes || []), c.title];
     if (codes.some((id) => liked.has(id))) score += 2;

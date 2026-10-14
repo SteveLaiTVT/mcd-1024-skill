@@ -27,11 +27,11 @@ export function factReason(plan, { rank, taste, cheaper } = {}) {
   return bits.slice(0, 2).join('；');
 }
 
-export function rankCandidates(candidates, { taste, budgetFen } = {}) {
+export function rankCandidates(candidates, { taste, budgetFen, wantMeats } = {}) {
   const { kept, skipped } = applyGate(candidates);
   const within = budgetFen == null ? kept : kept.filter((c) => c.priceFen <= budgetFen);
   const over = kept.filter((c) => budgetFen != null && c.priceFen > budgetFen);
-  const ranked = reRank(within, { taste, meatOf: meatsInName });
+  const ranked = reRank(within, { taste, meatOf: meatsInName, wantMeats });
   return { ranked: ranked.slice(0, 3), skipped, overBudget: over.length, emptyLine: ranked.length ? '' : allOut(skipped.length + over.length) };
 }
 
