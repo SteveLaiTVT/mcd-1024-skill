@@ -22,8 +22,6 @@ import { cardUrl, decodeCard, CARD_BASE_URL } from '../tui/card.mjs';
 import { encodeQR, utf8, QR_MAX_BYTES } from '../tui/qr.mjs';
 import { parseCommitNote, loadOrders, defaultOrdersPath, CART_NOTE, EMPTY_CART, EMPTY_GRAPH, NO_PICK } from '../tui/orders.mjs';
 import { radarAxes, renderRadar, NO_PICK_RADAR } from '../tui/radar-chart.mjs';
-import { matchCommands, runPicker } from '../tui/picker.mjs';
-import { EventEmitter } from 'node:events';
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
 const [templates, plans, offers, campaigns, packages, menu] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns', 'packages', 'menu'].map(json));
@@ -124,7 +122,7 @@ test('agent flow drives intent → MCP → store → history → quote → dual 
   const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, deepseekFactory: deepseek.factory });
   const out = sink(), ui = createUI({ output: out, palette: createPalette(false), redact: (t) => session.redact(t), tty: false });
   const result = await runAgentFlow(session, '1人、7分饱、人均30元、避开昨天吃过的主食，在深圳华强北附近', ui);
-  const text = out.text();
+  const text = out.text(), details = stripAnsi(result.details.join('\n'));
   assert.equal(result.status, 'picked', text);
   assert.deepEqual(mcp.tokens, [env.MCD_TOKEN]);
   assert.equal(session.store.storeCode, 'S1', 'Closed stores are never auto-selected');
@@ -136,10 +134,15 @@ test('agent flow drives intent → MCP → store → history → quote → dual 
   assert.deepEqual(deepseek.calls.map((c) => 'instruction' in c.input ? 'intent' : 'pick'), ['intent', 'pick', 'pick']);
   const sent = JSON.stringify(deepseek.calls);
   assert(!sent.includes(env.MCD_TOKEN) && !sent.includes('测试路') && !sent.includes(env.DEEPSEEK_API_KEY));
-  assert(!text.includes(env.MCD_TOKEN) && !text.includes(env.DEEPSEEK_API_KEY));
-  assert.match(text, /最近吃了啥 \/ 喝了啥/); assert.match(text, new RegExp(`10-12 周一 12:30 +吃：${mainNames.get(avoidCode)} +喝：可乐`));
-  for (const label of ['1/6 理解需求', '2/6 连接麦当劳 MCP', '3/6 选择门店', '4/6 读历史：最近吃了啥 / 喝了啥', '5/6 查券与官方整单核价', '6/6 饭搭子双 Agent 挑选', '这一餐就吃', '推荐 Agent →', '优化 Agent →']) assert(text.includes(label), label);
-  assert.match(text, /未领取，不计入价格|官方整单核价/);
+  assert(!text.includes(env.MCD_TOKEN) && !text.includes(env.DEEPSEEK_API_KEY) && !details.includes(env.MCD_TOKEN));
+  // The run ends with ONE answer: pick · price · store · one reason. No step log, no agent back-and-forth.
+  for (const s of ['这一餐就吃', result.plan.title, '门店：测试餐厅 · 到店自取', '理由：', '/why 看挑选过程']) assert(text.includes(s), s);
+  for (const s of ['1/6 理解需求', '推荐 Agent →', '优化 Agent →', '最近吃了啥 / 喝了啥', '也可以考虑']) assert(!text.includes(s), `not in the answer view: ${s}`);
+  // The process is kept for /why.
+  assert.match(details, /最近吃了啥 \/ 喝了啥/); assert.match(details, new RegExp(`10-12 周一 12:30 +吃：${mainNames.get(avoidCode)} +喝：可乐`));
+  for (const label of ['1/6 理解需求', '2/6 连接麦当劳 MCP', '3/6 选择门店', '4/6 读历史', '5/6 查券与官方整单核价', '6/6 饭搭子双 Agent 挑选', '推荐 Agent →', '优化 Agent →', '最近吃了啥 / 喝了啥']) assert(details.includes(label), label);
+  assert.match(details, /未领取，不计入价格|官方整单核价/);
+  assert.equal(session.lastDetails.lines, result.details);
   assert.equal(session.redact(`x ${env.MCD_TOKEN} y`), 'x [已隐藏] y');
 });
 
@@ -155,12 +158,14 @@ test('defaults: 1 person, 7分饱, ¥25 and the Huangbeiling store area unless t
   assert.equal(session.request.budgetPerPersonFen, 2500);
   const out = sink(), ui = createUI({ output: out, palette: createPalette(false), redact: (t) => session.redact(t), tty: false });
   const result = await runAgentFlow(session, '饿了，来份午饭', ui);
-  const text = out.text();
+  const text = out.text(), details = stripAnsi(result.details.join('\n'));
   assert.equal(result.status, 'picked', text);
   assert.deepEqual(mcp.calls.find((c) => c.name === 'query-nearby-stores').args, { beType: 1, searchType: 2, city: '深圳', keyword: '黄贝岭地铁站' });
-  assert.match(text, /默认 深圳市罗湖区黄贝街道黄贝岭地铁站 附近/); assert.match(text, /指令未给位置，默认搜索 深圳市罗湖区黄贝街道黄贝岭地铁站/);
-  assert.match(text, /1 人（默认） · 7 分饱（默认） · 人均 .*25.*（默认）/);
-  assert.match(text, /最近吃了啥 \/ 喝了啥/);
+  // The answer says the default area was used, in one note line; the full picture is in /why.
+  assert.match(text, /注：没给位置，按默认区域 深圳市罗湖区黄贝街道黄贝岭地铁站 选店/);
+  assert.match(details, /默认 深圳市罗湖区黄贝街道黄贝岭地铁站 附近/); assert.match(details, /指令未给位置，默认搜索 深圳市罗湖区黄贝街道黄贝岭地铁站/);
+  assert.match(details, /1 人（默认） · 7 分饱（默认） · 人均 .*25.*（默认）/);
+  assert.match(details, /最近吃了啥 \/ 喝了啥/);
   assert.deepEqual([session.request.people, session.request.portion, session.request.budgetPerPersonFen], [1, 7, 2500]);
 
   // A store chosen earlier (via /store or a previous run) beats the default area.
@@ -199,18 +204,19 @@ test('claiming coupons needs an explicit typed yes and the agent can never claim
 
 test('piped smoke run: demo mode renders, runs the agent with the wheel, shows radar, and exits cleanly', async () => {
   const input = new PassThrough(), out = sink();
-  input.end('/help\n1人 7分饱 人均30 用转盘\n/radar\n/radar apply\n/buddy\n/like\n/status\n');
+  input.end('/help\n1人 7分饱 人均30 用转盘\n/why\n/radar\n/radar apply\n/buddy\n/like\n/status\n');
   await runTui({ dataset, input, output: out, env: {}, demo: true, color: false });
   const text = out.text();
-  for (const s of ['麦麦饱饱盘 · 终端版', '非麦当劳官方产品', '6/6 转盘揭晓', '这一餐就吃', '虚构示例', '虚构示例不能导入最近主食', '饭搭子推荐', '已记住喜欢', '再见']) assert(text.includes(s), s);
+  for (const s of ['麦麦饱饱盘 · 终端版', '非麦当劳官方产品', '理由：转盘从预算内', '6/6 转盘揭晓', '这一餐就吃', '虚构示例', '虚构示例不能导入最近主食', '已记住喜欢', '样本模式 · ', '再见']) assert(text.includes(s), s);
+  assert.equal(text.split('这一餐就吃').length - 1, 2, 'the question and /buddy each end with one answer card');
 });
 
 test('piped demo run with no location and no budget uses the defaults and radar lists recent eats and drinks', async () => {
   const input = new PassThrough(), out = sink();
-  input.end('来份午饭\n/radar\n/quit\n');
+  input.end('来份午饭\n/why\n/radar\n/quit\n');
   await runTui({ dataset, input, output: out, env: {}, demo: true, color: false });
   const text = out.text();
-  for (const s of ['默认选店区域：深圳市罗湖区黄贝街道黄贝岭地铁站', '默认餐量：1 人 · 7 分饱 · 人均 ¥25', '1 人（默认） · 7 分饱（默认）', '4/6 读历史：最近吃了啥 / 喝了啥', '最近吃了啥 / 喝了啥（虚构示例', '麦当劳雷达', '再见']) assert(text.includes(s), s);
+  for (const s of ['默认选店区域：深圳市罗湖区黄贝街道黄贝岭地铁站', '默认餐量：1 人 · 7 分饱 · 人均 ¥25', '1 人（默认） · 7 分饱（默认）', '4/6 读历史', '最近吃了啥 / 喝了啥（虚构示例', '麦当劳雷达', '再见']) assert(text.includes(s), s);
   assert.match(text, /10-09 周五 12:20 +吃：.+ +喝：(?:可乐|无糖可乐)/);
 });
 
@@ -219,7 +225,7 @@ test('missing token fails gracefully with a clear message instead of prompting',
   input.end('1人 7分饱 人均30 @深圳 华强北\n');
   await runTui({ dataset, input, output: out, env: {}, color: false });
   const text = out.text();
-  assert.match(text, /MCD_TOKEN：未设置/); assert.match(text, /2\/6 连接麦当劳 MCP .*未检测到环境变量 MCD_TOKEN/);
+  assert.match(text, /MCD_TOKEN：未设置/); assert.match(text, /没挑出来/); assert.match(text, /第 2 步「连接麦当劳 MCP」没完成：未检测到环境变量 MCD_TOKEN/);
 });
 
 test('coupons: step 5 shows which coupons priced the meal and which expire soon; DeepSeek gets names/savings/expiry only and says when a pick uses one', async () => {
@@ -235,16 +241,20 @@ test('coupons: step 5 shows which coupons priced the meal and which expire soon;
   const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, deepseekFactory, random: () => 0.99 });
   const out = sink(), ui = createUI({ output: out, palette: createPalette(false), redact: (t) => session.redact(t), tty: false });
   const result = await runAgentFlow(session, '来份午饭', ui);
-  const text = out.text();
+  const text = out.text(), details = stripAnsi(result.details.join('\n'));
   assert.equal(result.status, 'picked', text);
   assert.deepEqual(result.plan.couponNames, ['快过期立减券']);
-  assert.match(text, /手里的券（持有 2 张 · 本店可用于核价 2 张/);
-  assert.match(text, /核价用上的券：快过期立减券（最多省 ¥3\.00/);
-  assert.match(text, /⏰ 快过期：快过期立减券 · 10-14 23:59 到期（还剩约 1 天） · 已用于核价/);
-  assert.match(text, /其他可用券：年底甜品券 12-31 23:59 到期/);
-  assert.match(text, /官方报价已用券：快过期立减券（10-14 23:59 到期，快过期）/);
-  assert.match(text, /理由：用上手里的券/);
-  assert(text.includes(`助理想法：${thought}`), text);
+  // The answer: the coupon on the price line and the assistant's one-liner as the reason.
+  assert.match(text, /已用券 快过期立减券，省 ¥3\.00/);
+  assert(text.includes(`理由：${thought}`), text);
+  // The coupon picture and the agents' reasoning are in /why.
+  assert.match(details, /手里的券（持有 2 张 · 本店可用于核价 2 张/);
+  assert.match(details, /核价用上的券：快过期立减券（最多省 ¥3\.00/);
+  assert.match(details, /⏰ 快过期：快过期立减券 · 10-14 23:59 到期（还剩约 1 天） · 已用于核价/);
+  assert.match(details, /其他可用券：年底甜品券 12-31 23:59 到期/);
+  assert.match(details, /官方报价已用券：快过期立减券（10-14 23:59 到期，快过期）/);
+  assert.match(details, /理由：用上手里的券/);
+  assert(details.includes(`助理想法：${thought}`), details);
   const picks = calls.filter((c) => !('instruction' in c.input));
   assert.equal(picks.length, 2);
   for (const { input, system } of picks) {
@@ -333,7 +343,7 @@ test('piped demo smoke: a pick, /receipt, /radar, /quit; automatic receipts foll
   const receipts = (text) => text.split(QR_LABEL).length - 1;
   const text = await run('/receipt\n1人 7分饱 人均30\n/receipt\n/radar\n/quit\n', [0.99]);
   assert.match(text, /还没有挑出的套餐/);
-  for (const s of ['这一餐就吃', '助理想法', '麦麦饱饱盘 · 选餐小票', '非官方产品', '想买就说 就吃这个了', '麦当劳雷达', '再见']) assert(text.includes(s), s);
+  for (const s of ['这一餐就吃', '理由：', '麦麦饱饱盘 · 选餐小票', '非官方产品', '想买就说 就吃这个了', '麦当劳雷达', '再见']) assert(text.includes(s), s);
   assert.equal(receipts(text), 1, 'only the explicit /receipt prints when the draw misses');
   const three = await run('1人 7分饱 人均30 用转盘\n/wheel\n/wheel\n/quit\n', [0.2, 0.5, 0.9]);
   assert.equal(receipts(three), 1, 'draws 0.2 / 0.5 / 0.9 → exactly one automatic receipt');
@@ -404,7 +414,7 @@ test('the allergy list never reaches DeepSeek or MCP, even when stated in the in
   const mcp = fakeMcp({ coupons: true });
   const deepseek = fakeDeepSeek({ people: null, portion: null, budgetPerPersonYuan: null, avoidRecentDays: 0, avoidMainNames: [], city: null, keyword: null, goal: null, mood: null, finish: 'agent' });
   const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, deepseekFactory: deepseek.factory, random: () => 0.99 });
-  const text = await pipe('我对芒果过敏，来份午饭\n/allergy 花生\n不要花生，来份午饭\n/quit\n', { session });
+  const text = await pipe('我对芒果过敏，来份午饭\n/allergy 花生\n不要花生，来份午饭\n/why\n/quit\n', { session });
   assert.match(text, /已记录过敏：芒果/); assert.match(text, /已记录过敏：花生/);
   assert.match(text, /过敏筛选（本地，按名称关键词）：芒果、花生/);
   assert.deepEqual(deepseek.calls.filter((c) => 'instruction' in c.input).map((c) => c.input.instruction), ['来份午饭', '不要，来份午饭']);
@@ -481,7 +491,7 @@ test('/help lists every command the shell handles', async () => {
 });
 
 test('piped demo smoke: a pick with upgrade math, /receipt, /radar, /coupons, /activity, /quit', async () => {
-  const text = await pipe('1人 5分饱 人均30 想吃麦香鱼\n/receipt\n/radar\n/coupons\n/activity\n/quit\n', { dataset: { ...dataset, menu }, demo: true, random: () => 0.99 });
+  const text = await pipe('1人 5分饱 人均30 想吃麦香鱼\n/why\n/receipt\n/radar\n/coupons\n/activity\n/quit\n', { dataset: { ...dataset, menu }, demo: true, random: () => 0.99 });
   for (const s of ['想吃：麦香鱼', '单点麦香鱼 ¥22.50，套餐只要 ¥14.90', '比单点还省 ¥7.60', '这一餐就吃', '麦麦饱饱盘 · 选餐小票', '麦当劳雷达',
     '优惠口袋 · 样本', '可领券', '仅展示', '麦当劳 MCP 没有“报名', '再见']) assert(text.includes(s), s);
 });
@@ -561,22 +571,9 @@ test('radar chart: five axes from real data only, normalised 0..1, missing data 
   for (const s of ['本餐雷达图', '价格友好度', '口味新鲜度', '对比的是虚构示例历史']) assert(piped.includes(s), s);
 });
 
-test('/ command picker: lists matches with descriptions in piped input without hanging; arrow keys pick on a TTY', async () => {
-  assert.deepEqual(matchCommands('ca').map((c) => c.name), ['cart']);
-  assert.equal(matchCommands('').length, COMMAND_HELP.length);
-  assert.deepEqual(matchCommands('c').map((c) => c.name), ['connect', 'coupons', 'claim', 'commit', 'cart', 'clear']);
+// The interactive palette is tested in tui-ink.test.mjs (Ink renderer + a real PTY); piped input gets the list.
+test('/ and /partial in piped input print the matching commands with descriptions and keywords, without hanging', async () => {
   const text = await pipe('/\n/ca\n/zzz\n/quit\n', { demo: true });
-  for (const s of ['全部命令：', '以 /ca 开头的命令：', '/cart [rm <hash>|clear]', '查看购物车', '/commit -m "备注"', '未知命令 /zzz', '再见']) assert(text.includes(s), s);
-
-  const P = createPalette(false), input = new EventEmitter(), out = sink(), original = () => {};
-  input.on('keypress', original);
-  const items = matchCommands('c'), chosen = runPicker({ input, output: out, items, P });
-  assert.equal(input.listeners('keypress').length, 1); assert.notEqual(input.listeners('keypress')[0], original, 'readline detached while picking');
-  for (const name of ['down', 'down', 'down', 'up', 'down', 'return']) input.emit('keypress', '', { name });
-  assert.equal((await chosen).name, 'commit');
-  assert.deepEqual(input.listeners('keypress'), [original], 'readline listener restored');
-  assert.match(stripAnsi(out.text()), /❯ \/commit -m "备注"/);
-  const cancelled = runPicker({ input, output: sink(), items, P });
-  input.emit('keypress', '', { name: 'escape' });
-  assert.equal(await cancelled, null);
+  for (const s of ['全部命令：', '以 /ca 开头的命令：', '/cart [rm <hash>|clear]', '查看购物车', '购物车 清单', '/commit -m "备注"', '未知命令 /zzz', '再见']) assert(text.includes(s), s);
+  assert.equal(text.split('/connect').length - 1, 1, "only '/' alone lists /connect");
 });

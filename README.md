@@ -39,9 +39,10 @@
 
 ## 本地构建与体验
 
-Node.js 20 或以上。没有 npm 依赖，无需安装依赖即可运行：
+Node.js 20 或以上。浏览器端与构建脚本不依赖任何 npm 包；终端版使用 [Ink](https://github.com/vadimdemedes/ink)（+ React），测试用 `ink-testing-library`，所以先安装依赖：
 
 ```bash
+npm install
 npm test
 npm run build
 ```
@@ -65,9 +66,10 @@ npm run preview
 
 ## 终端版（TUI）
 
-同一套选餐逻辑的终端界面，直接复用 `web/*.mjs`（MCP 客户端、套餐引擎、历史雷达、DeepSeek 双 Agent），只用 Node 内置 `readline` 与 ANSI 转义，无 npm 依赖。参赛者独立开发，非麦当劳官方产品。
+同一套选餐逻辑的终端界面，直接复用 `web/*.mjs`（MCP 客户端、套餐引擎、历史雷达、DeepSeek 双 Agent）。界面用 [Ink](https://github.com/vadimdemedes/ink)（终端里的 React）搭建，布局参考 Codex 的 TUI。参赛者独立开发，非麦当劳官方产品。
 
 ```bash
+npm install                     # 一次即可：ink、react（以及测试用的 ink-testing-library）
 export MCD_TOKEN=...            # 自己的麦当劳 MCP Token：选店、查券、核价、历史
 export DEEPSEEK_API_KEY=...     # 可选：需求理解 + 推荐 / 优化双 Agent；不设置则用本地偏好推荐
 npm run tui
@@ -76,7 +78,9 @@ npm run tui -- --demo           # 不联网：2026-10-10 深圳样本价与虚�
 
 两个凭证**只从进程环境变量读取**：终端版不会询问、显示或写入任何文件，输出前还会对凭证做一次遮盖；退出即随进程内存清除。Node.js 20 或以上。
 
-**Agent 模式（核心）**：直接输入一句话，例如 `1人、7分饱、人均30元、避开昨天吃过的主食 @深圳 华强北`，终端逐步显示每一步与结果：
+**界面**：输出在上方滚动（写进终端自己的回滚区，鼠标滚轮 / 终端滚动条即可往回看，复制也照常），底部是输入框，输入框下面一行是状态栏（模式 · 门店 · 人数 / 食量 / 人均 · 报价剩余时间 · 推荐方式）。有请求在跑时输入框上方只显示一行转圈的进度和当前步骤，Ctrl+C 取消；空闲时 Ctrl+C 或 `/quit` 退出。领券、清空购物车、“是这家店吗？”这类确认问题会接管输入框（黄色边框），回答后按 Enter。↑↓ 在输入框为空或不是 `/` 开头时翻输入历史，Ctrl+U 清空输入。stdin 或 stdout 不是终端（管道输入、脚本、`npm test`）时自动退回逐行模式：每行输入回显在 `› ` 后面，不进入 raw mode，不会卡住。
+
+**Agent 模式（核心）**：直接输入一句话，例如 `1人、7分饱、人均30元、避开昨天吃过的主食 @深圳 华强北`。运行时只显示一行进度（转圈 + 当前步骤，如“5/6 查券与官方整单核价”）；结束时只给**一个答案**：吃哪一份、整单价（用了哪张券、省多少）、门店，加一句理由；需要提醒的（例如没给位置用了默认区域、过敏筛选排除了几份、DeepSeek 没完成改用本地推荐）合成一行“注”。推荐 Agent 与优化 Agent 的商量在后台完成，不会把两边各自的选择摆出来让人看它们来回改。想看完整过程就输入 `/why`：下面六步每一步的结果、核价明细、券、两个 Agent 各自选了什么、备选和“助理想法”都在里面。
 
 1. 理解需求：本地规则解析；有 DeepSeek key 时由需求理解 Agent 补全（只发送这句话和主食名称表，结果严格校验，字面数字以本地解析为准）。
 2. 连接麦当劳 MCP：`initialize → now-time-info`。
@@ -96,7 +100,11 @@ npm run tui -- --demo           # 不联网：2026-10-10 深圳样本价与虚�
 
 样本模式（`--demo`）固定使用样本门店，不做门店搜索。
 
-**手动命令**（`/help` 列出程序处理的全部命令，启动时会自检两者一致）：`/store 城市 关键词` 选店、`/use 序号`、`/coupons` 优惠口袋（先列可领券：名称 · 可省 · 有效期，再列持有券）、`/activity` 活动日历（也可以直接问“有什么活动”）、`/allergy [过敏原…]` 与 `/allergy-clear 过敏原`、`/status`、`/clear`、`/quit`、`/set 人数 食量 人均预算`、`/avoid` 避开主食、`/price` 核价、`/wheel` 转盘、`/buddy [心情] [local]` 饭搭子、`/prefs goal|persona …`、`/like` `/less`（仅本次会话）、`/radar [recent|year]` 本餐雷达图 + 终端热力图 + “最近吃了啥 / 喝了啥”（按日期列出最近订单里的具体餐品与饮品；样本模式标明虚构示例）与 `/radar apply`、`/weather` 门店城市天气、`/claim` 领取全部可领券（必须输入 `yes` 确认，结果不明确不重试，领取后重新核价）、`/receipt` 打印最近一份的小票、`/commit -m "备注"` · `/push` · `/cart` · `/graph` 本地购物车（见下）、`/order [订单号]` 真实订单列表与实时状态（见下）。只输入 `/` 或命令开头（如 `/ca`）会列出匹配的命令和一句说明：终端里用 ↑↓ 选择、Enter 把命令填进输入行（不会直接执行）、Esc 取消；管道输入只打印列表、继续往下执行，不会卡住。选择器用 readline 按键事件手写，终端版仍然零第三方依赖。
+**手动命令**（`/help` 列出程序处理的全部命令，启动时会自检两者一致）：`/store 城市 关键词` 选店、`/use 序号`、`/coupons` 优惠口袋（先列可领券：名称 · 可省 · 有效期，再列持有券）、`/activity` 活动日历（也可以直接问“有什么活动”）、`/allergy [过敏原…]` 与 `/allergy-clear 过敏原`、`/status`、`/clear`、`/quit`、`/set 人数 食量 人均预算`、`/avoid` 避开主食、`/price` 核价、`/wheel` 转盘、`/buddy [心情] [local]` 饭搭子、`/prefs goal|persona …`、`/like` `/less`（仅本次会话）、`/radar [recent|year]` 本餐雷达图 + 终端热力图 + “最近吃了啥 / 喝了啥”（按日期列出最近订单里的具体餐品与饮品；样本模式标明虚构示例）与 `/radar apply`、`/weather` 门店城市天气、`/claim` 领取全部可领券（必须输入 `yes` 确认，结果不明确不重试，领取后重新核价）、`/receipt` 打印最近一份的小票、`/commit -m "备注"` · `/push` · `/cart` · `/graph` 本地购物车（见下）、`/order [订单号]` 真实订单列表与实时状态（见下）、`/why` 上一次挑选的完整过程。
+
+**命令面板**：在输入框里一敲 `/` 就弹出命令面板（不用回车），每行是命令、一句说明和几个关键词；继续输入会按命令名前缀过滤（`/ca` 只剩 `/cart`，`/cou` 只剩 `/coupons`），前缀对不上任何命令时按中文关键词找（`/券` → `/coupons` `/claim`）。↑↓ 选择，Enter 执行选中的命令（需要参数的如 `/use` `/set` `/commit` 会先填进输入框等你补参数），Tab 只补全不执行，Esc 关闭面板并保留已输入的文字。管道输入里单独一行 `/` 或 `/ca` 会打印同样的列表，然后继续往下执行。
+
+真实终端里的面板由 `tests/pty_palette.py` 验证：它在伪终端（PTY，raw mode，140×40）里启动 `--demo`，像终端一样逐键发送 `/`、`c`、`a`、↑↓、Esc、Backspace（`0x7f`，macOS 终端发的就是它）、Enter，检查屏幕上画出的内容，最后 `/quit` 并确认退出码为 0。`npm test` 会自动运行它（没有 python3 或 PTY 时跳过并说明）；也可以单独运行 `python3 tests/pty_palette.py`。
 
 **过敏记录（健康数据，只在本机）**：`/allergy 花生 虾` 添加、`/allergy` 列出、`/allergy-clear 花生` 删除；直接说“我对花生过敏”“我花生过敏”也会记录，每次增删都会确认。记录保存在 `~/.config/mcd-tui/profile.json`（目录权限 700、文件 600；`--no-profile` 只留在本次会话内存），文件已在 `.gitignore` 中，不得提交。过敏信息**从不**发送给 DeepSeek 或麦当劳 MCP，也不写日志：包含过敏的句子在本地处理后才把其余内容交给需求理解 Agent。筛选在本地按 `tui/allergy.mjs` 里可见的关键词表匹配餐品名称；名称看不出成分（如“随心配”未展开）时标“成分不明，已排除”，不会悄悄放进候选。名称没有关键词不代表不含该过敏原，请以麦当劳官方过敏原信息与门店确认为准。
 
@@ -148,7 +156,7 @@ JavaScript 69 项测试通过，包含双 Agent、记忆和 key 恢复 / 隔离�
 | 入口 | 内容 |
 |---|---|
 | [web/app.js](web/app.js) | 页面状态、账号与门店、领券确认、核价和圆盘交互 |
-| [tui/](tui/) | 终端版：Agent 模式流程、命令行交互、终端热力图；凭证只读进程环境变量 |
+| [tui/](tui/) | 终端版：Ink 界面（`ink-app.mjs`）、命令面板（`palette.mjs`）、命令核心（`shell.mjs`）、Agent 模式流程、终端热力图；凭证只读进程环境变量 |
 | [web/mcp-client.mjs](web/mcp-client.mjs) | 固定官方域名的 MCP 客户端，运行中的凭证仅在内存 |
 | [web/account-storage.mjs](web/account-storage.mjs) | 用户选择后的本机保存、删除、跨页变更通知与串行访问 |
 | [web/store-search.mjs](web/store-search.mjs) | 官方门店营业信息、地址位置和城市识别 |

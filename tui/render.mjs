@@ -50,12 +50,36 @@ export function renderCoupons(picture, P, { demo = false } = {}) {
   return lines;
 }
 
+// One-line status (mode · store · budget · quote · agent), like the model line under Codex's input box.
 export function statusLine(session, P) {
   const s = session, r = s.request, remaining = s.remainingSeconds();
   const mcp = s.demo ? P.yellow('样本模式') : s.connected ? P.green('MCP 已连接') : s.hasMcdToken ? P.yellow('MCP 未连接') : P.red('缺 MCD_TOKEN');
   const quote = !s.report ? '未核价' : s.report.sourceKind === 'demo-snapshot' ? '历史样本价' : s.fresh() ? `报价剩 ${clock(remaining)}` : P.red('报价已失效');
   const avoid = r.avoidMainCodes.length ? ` · 避开 ${r.avoidMainCodes.length} 种主食` : '';
-  return P.gray(`[ ${mcp} | ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} | ${r.people}人·${r.portion}分饱·人均${money(r.budgetPerPersonFen)}${avoid} | ${quote} | ${s.hasDeepSeek ? 'DeepSeek 就绪' : '无 DeepSeek key，用本地偏好'} ]`);
+  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · ${r.people}人 ${r.portion}分饱 人均${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
+}
+
+// The single line of "why" an answer carries: the assistant's one-liner, else the reason signals.
+export function pickReason(plan) {
+  if (plan.thought) return plan.thought;
+  const signals = plan.signals || [], usesCoupon = plan.couponNames?.length > 0;
+  const reasons = usesCoupon && !signals.includes('coupon') ? ['coupon', ...signals] : signals;
+  if (reasons.length) return `${signalText(reasons)}${usesCoupon && plan.savingFen > 0 ? `（省了 ${money(plan.savingFen)}）` : ''}`;
+  return plan.upgrade ? upgradeText(plan.upgrade) : '预算内用券后最便宜的一份';
+}
+
+// The one answer a question ends with: the pick, its price, the store and one line of reason.
+// How the agents got there lives in /why, never here.
+export function renderAnswer(plan, P, { storeName = '', report = null, remaining = null, reason = '', notes = [] } = {}) {
+  const people = report?.request?.people || 1;
+  const coupon = plan.couponNames?.length ? P.cyan(` · 已用券 ${plan.couponNames.join('、')}${plan.savingFen > 0 ? `，省 ${money(plan.savingFen)}` : ''}`) : '';
+  const lines = [`${P.brand(P.bold(plan.title))}  ${P.bold(money(plan.priceFen))}${people > 1 ? P.gray(`（人均约 ${money(Math.ceil(plan.priceFen / people))}）`) : ''}${coupon}`,
+    `门店：${storeName || '未选门店'} · 到店自取`, `理由：${reason || pickReason(plan)}`];
+  if (notes.length) lines.push(P.gray(`注：${notes.join('；')}`));
+  if (report?.sourceKind === 'demo-snapshot') lines.push(P.yellow('样本价，仅供体验；实时价格请连接后重新核价。'));
+  else if (remaining != null) lines.push(P.gray(`报价 ${clock(remaining)} 后失效。`));
+  lines.push(P.gray('说“就吃这个了”下单（到店自取）· /why 看挑选过程 · /receipt 小票'));
+  return lines;
 }
 
 export function renderStores(stores, P) {
@@ -252,45 +276,50 @@ export function renderRecentEats(history, P, { limit = 6 } = {}) {
   return lines;
 }
 
-// Every command the shell handles, with its aliases. app.mjs refuses to start if a handler is missing here.
+// Every command the shell handles: [names (first is primary, rest are aliases), usage, description, palette keywords].
+// shell.mjs refuses to start if a handler is missing here. Keywords are Chinese on purpose: an ASCII query
+// filters by command-name prefix only, so '/ca' is exactly /cart.
 export const COMMAND_HELP = [
-  [['connect'], '/connect', '用环境变量 MCD_TOKEN 连接麦当劳 MCP'],
-  [['store'], '/store [城市 关键词]', `搜索到店门店；不带参数搜默认区域 ${DEFAULT_STORE_SEARCH.label}`],
-  [['use'], '/use 序号', '选择 /store 列出的门店（也可以直接输入序号）'],
-  [['coupons'], '/coupons', '先列可领券（名称 · 可省 · 有效期），再列持有券；只查看，不领取'],
-  [['claim'], '/claim', '领取全部可领券（先列出可领券，需输入 yes 明确确认）'],
-  [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与；也可以说“有什么活动”'],
-  [['set'], '/set 人数 食量 人均预算', '例：/set 2 7 35（食量 5/7/9）'],
-  [['avoid'], '/avoid [主食名…|clear]', '查看或切换要避开的主食'],
-  [['allergy'], '/allergy [过敏原…]', '不带参数列出，带参数添加（如 /allergy 花生 虾）；也可以说“我对花生过敏”'],
-  [['allergy-clear'], '/allergy-clear 过敏原', '删除一项过敏记录'],
-  [['price'], '/price', '官方整单核价：单点主食和套餐按用券后价格一起比（5 分钟内有效）'],
-  [['wheel'], '/wheel', '转盘随机揭晓一份（同轮不重复）'],
-  [['buddy'], '/buddy [心情] [local]', 'DeepSeek 推荐 + 优化双 Agent；心情 normal/comfort/surprise/gathering'],
-  [['prefs'], '/prefs goal|persona|mode 值', '目标 cheapest（默认）/balanced/variety；风格 cozy/frugal/playful'],
-  [['like', 'less'], '/like · /less', '对上一份给反馈（仅本次会话内存）'],
-  [['receipt'], '/receipt', '打印最近一份的小票；扫二维码打开套餐卡片（静态页，不是付款码）'],
-  [['commit'], '/commit -m "备注"', '把当前这一餐记成本地提交（7 位 hash），不下单'],
-  [['push'], '/push', '把未 push 的提交全部加入购物车（本地清单，还不是订单）'],
-  [['cart'], '/cart [rm <hash>|clear]', '查看购物车；rm 移出一单，clear 清空（需输入 yes）'],
-  [['order'], '/order [订单号]', '列出真实订单（订单号 · 餐 · 金额 · 状态 · 时间）；带订单号查实时状态（也可以回复“支付完成”）'],
-  [['graph'], '/graph', '像 git log --graph 一样看提交历史和 origin/main'],
-  [['radar'], '/radar [recent|year] [年] · /radar apply', '本餐雷达图 + 历史订单热力图 + 最近吃了啥；apply 把前两天的主食加入避开'],
-  [['weather'], '/weather', '查询门店所在城市天气，供饭搭子参考'],
-  [['help', 'h', '?'], '/help · /h · /?', '显示这份命令表'],
-  [['status'], '/status', '当前连接、门店、餐量和报价状态'],
-  [['clear'], '/clear', '清屏'],
-  [['quit', 'exit', 'q'], '/quit · /exit · /q', '退出'],
+  [['connect'], '/connect', '用环境变量 MCD_TOKEN 连接麦当劳 MCP', ['连接', '登录', '令牌']],
+  [['store'], '/store [城市 关键词]', `搜索到店门店；不带参数搜默认区域 ${DEFAULT_STORE_SEARCH.label}`, ['门店', '选店', '位置', '附近']],
+  [['use'], '/use 序号', '选择 /store 列出的门店（也可以直接输入序号）', ['选择', '序号', '门店']],
+  [['coupons'], '/coupons', '先列可领券（名称 · 可省 · 有效期），再列持有券；只查看，不领取', ['券', '优惠', '券包', '可领']],
+  [['claim'], '/claim', '领取全部可领券（先列出可领券，需输入 yes 明确确认）', ['领券', '领取', '券']],
+  [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与；也可以说“有什么活动”', ['活动', '日历', '报名']],
+  [['set'], '/set 人数 食量 人均预算', '例：/set 2 7 35（食量 5/7/9）', ['人数', '食量', '预算']],
+  [['avoid'], '/avoid [主食名…|clear]', '查看或切换要避开的主食', ['避开', '不吃', '主食']],
+  [['allergy'], '/allergy [过敏原…]', '不带参数列出，带参数添加（如 /allergy 花生 虾）；也可以说“我对花生过敏”', ['过敏', '忌口']],
+  [['allergy-clear'], '/allergy-clear 过敏原', '删除一项过敏记录', ['过敏', '删除']],
+  [['price'], '/price', '官方整单核价：单点主食和套餐按用券后价格一起比（5 分钟内有效）', ['核价', '价格', '报价']],
+  [['wheel'], '/wheel', '转盘随机揭晓一份（同轮不重复）', ['转盘', '随机']],
+  [['buddy'], '/buddy [心情] [local]', 'DeepSeek 推荐 + 优化双 Agent；心情 normal/comfort/surprise/gathering', ['推荐', '饭搭子', '挑选']],
+  [['why'], '/why', '上一次挑选的详细过程：需求、门店、历史、核价、两个 Agent 的讨论与备选', ['过程', '详情', '理由', '备选']],
+  [['prefs'], '/prefs goal|persona|mode 值', '目标 cheapest（默认）/balanced/variety；风格 cozy/frugal/playful', ['偏好', '目标', '风格']],
+  [['like'], '/like', '喜欢上一份（仅本次会话内存）', ['喜欢', '反馈']],
+  [['less'], '/less', '以后少推荐上一份（仅本次会话内存）', ['少推荐', '反馈']],
+  [['receipt'], '/receipt', '打印最近一份的小票；扫二维码打开套餐卡片（静态页，不是付款码）', ['小票', '二维码', '卡片']],
+  [['commit'], '/commit -m "备注"', '把当前这一餐记成本地提交（7 位 hash），不下单', ['记下', '提交', '备注']],
+  [['push'], '/push', '把未 push 的提交全部加入购物车（本地清单，还不是订单）', ['购物车', '加入']],
+  [['cart'], '/cart [rm <hash>|clear]', '查看购物车；rm 移出一单，clear 清空（需输入 yes）', ['购物车', '清单']],
+  [['order'], '/order [订单号]', '列出真实订单（订单号 · 餐 · 金额 · 状态 · 时间）；带订单号查实时状态（也可以回复“支付完成”）', ['订单', '支付', '状态']],
+  [['graph'], '/graph', '像 git log --graph 一样看提交历史和 origin/main', ['历史', '提交']],
+  [['radar'], '/radar [recent|year] [年] · /radar apply', '本餐雷达图 + 历史订单热力图 + 最近吃了啥；apply 把前两天的主食加入避开', ['雷达', '热力图', '历史']],
+  [['weather'], '/weather', '查询门店所在城市天气，供饭搭子参考', ['天气']],
+  [['help', 'h', '?'], '/help · /h · /?', '显示这份命令表', ['帮助', '命令']],
+  [['status'], '/status', '当前连接、门店、餐量和报价状态', ['状态', '连接']],
+  [['clear'], '/clear', '清屏', ['清屏']],
+  [['quit', 'exit', 'q'], '/quit · /exit · /q', '退出', ['退出']],
 ];
 export const HELP_COMMANDS = new Set(COMMAND_HELP.flatMap(([names]) => names));
 
 export function helpLines(P) {
   const c = (cmd, text) => `${P.cyan(padEnd(cmd, 26))}${text}`;
   return [
-    P.bold('直接输入一句话 → Agent 自动走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选'),
+    P.bold('直接输入一句话 → Agent 在后台走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选，最后只给一个答案'),
     P.gray('  例：1人、7分饱、人均30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
     P.gray(`  没写的默认：${DEFAULT_INTENT.people} 人 · ${DEFAULT_INTENT.portion} 分饱 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
-    P.gray('  只输入 / 或命令开头（如 /ca）会列出匹配的命令；终端里可用 ↑↓ 选择'),
+    P.gray('  /why 查看上一次的完整过程（每一步的结果、两个 Agent 的选择与备选）'),
+    P.gray('  输入 / 立即弹出命令面板（按前缀过滤，带说明和关键词）：↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭'),
     `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 就这个 / 要这个 / 下单；到店自取，不支持外送）')}`,
     P.gray('  先列出这单能用、要领的券，再问“是这家店吗？”；回 是 才领券、重新核价（只会持平或更便宜）并在麦当劳创建订单，'),
     P.gray('  然后给支付链接和支付二维码，扫码或在麦当劳 App 付款；回 不是 就取消。付完说 支付完成 查订单状态。'),

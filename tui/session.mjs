@@ -45,6 +45,7 @@ export class TuiSession {
     this.dataset = dataset; this.demo = demo; this.mcpFactory = mcpFactory; this.weatherClient = weatherClient; this.now = now; this.wheel = wheel; this.random = random;
     this.store = null; this.history = null; this.benefits = null; this.weather = { status: 'unavailable' }; this.lastPick = null;
     this.lastReceipt = null; // Survives invalidate(): it is a record of a past pick, timestamped.
+    this.lastDetails = null; // { query, lines }: the last pick's full process, shown only by /why. Local only.
     this.request = { people: DEFAULT_INTENT.people, portion: DEFAULT_INTENT.portion, budgetPerPersonFen: Math.round(DEFAULT_INTENT.budgetPerPersonYuan * 100), avoidMainCodes: [] };
     this.profile = {}; // Only values set explicitly with /set; instructions without numbers fall back to these, then DEFAULT_INTENT.
     // Cheapest effective price (after coupons) wins unless the user asks for another goal.
