@@ -47,7 +47,7 @@ export class TuiSession {
     this.store = null; this.history = null; this.benefits = null; this.weather = { status: 'unavailable' }; this.lastPick = null;
     this.lastReceipt = null; // Survives invalidate(): it is a record of a past pick, timestamped.
     this.lastDetails = null; // { query, lines }: the last pick's full process, shown only by /why. Local only.
-    this.request = { people: DEFAULT_INTENT.people, portion: DEFAULT_INTENT.portion, budgetPerPersonFen: Math.round(DEFAULT_INTENT.budgetPerPersonYuan * 100), avoidMainCodes: [] };
+    this.request = { people: DEFAULT_INTENT.people, budgetPerPersonFen: Math.round(DEFAULT_INTENT.budgetPerPersonYuan * 100), avoidMainCodes: [] };
     this.profile = {}; // Only values set explicitly with /set; instructions without numbers fall back to these, then DEFAULT_INTENT.
     // Cheapest effective price (after coupons) wins unless the user asks for another goal.
     this.preferences = { ...defaultPreferences(), mode: 'team', goal: 'cheapest' };
@@ -256,7 +256,7 @@ export class TuiSession {
     if (report.menu?.ok) this.menu = { storeCode: context.storeCode, items: report.menu.items, shape: report.menu.shape };
     const setsQuoted = report.quotedPlans.length;
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
-    const mains = alaCarteMains(this.mainNames, request);
+    const mains = alaCarteMains(this.mainNames, request, new Set(this.dataset.templates.mainProductCodes));
     const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
       : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress) : {};
     mergeAlaCarte(report, singles);

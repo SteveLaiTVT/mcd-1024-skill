@@ -56,7 +56,7 @@ export function statusLine(session, P) {
   const mcp = s.demo ? P.yellow('样本模式') : s.connected ? P.green('MCP 已连接') : s.hasMcdToken ? P.yellow('MCP 未连接') : P.red('缺 MCD_TOKEN');
   const quote = !s.report ? '未核价' : s.report.sourceKind === 'demo-snapshot' ? '历史样本价' : s.fresh() ? `报价剩 ${clock(remaining)}` : P.red('报价已失效');
   const avoid = r.avoidMainCodes.length ? ` · 避开 ${r.avoidMainCodes.length} 种主食` : '';
-  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · ${r.people}人 ${r.portion}分饱 人均${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
+  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · ${r.people}人 人均${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
 }
 
 // The single line of "why" an answer carries: the assistant's one-liner, else the reason signals.
@@ -155,7 +155,7 @@ export function renderActivities(result, P) {
 export function renderReport(report, P, { remaining = null } = {}) {
   const r = report.request, lines = [];
   const source = report.sourceKind === 'demo-snapshot' ? P.yellow('历史样本价（2026-10-10 深圳样本门店），不是实时报价') : `官方整单核价 · ${remaining == null ? '' : `${clock(remaining)} 后失效（最长 5 分钟）`}`;
-  lines.push(`${r.people} 人 · ${r.portion} 分饱 · 整顿预算 ${money(r.totalBudgetFen)} · ${source}`);
+  lines.push(`${r.people} 人 · 整顿预算 ${money(r.totalBudgetFen)} · ${source}`);
   if (!report.quotedPlans.length) lines.push(P.yellow('这次没有可用的套餐或单点报价。'));
   lines.push(P.gray('按用券后的实际价格从低到高排（单点主食和套餐一起比，同价优先套餐）：'));
   const pool = new Set(report.candidates.map((p) => p.id));
@@ -163,8 +163,7 @@ export function renderReport(report, P, { remaining = null } = {}) {
     const mark = pool.has(p.id) ? P.green('✓') : P.gray('×');
     const saving = p.savingFen > 0 ? P.green(` 省${money(p.savingFen)}`) : '';
     const coupons = p.couponNames?.length ? P.cyan(` 用券：${p.couponNames.join('、')}`) : '';
-    const note = p.kind === 'alacarte' && p.fitsPortion === false ? P.gray(' 只够约5分饱，仅比价') : '';
-    lines.push(`${mark} ${padEnd(p.title, 26)} ${padEnd(p.wheelKind || '', 12)} ${P.bold(money(p.priceFen))}${saving}${coupons}${note}`);
+    lines.push(`${mark} ${padEnd(p.title, 26)} ${padEnd(p.wheelKind || '', 12)} ${P.bold(money(p.priceFen))}${saving}${coupons}`);
   }
   for (const p of [...report.excludedPlans, ...report.failedPlans].filter((p) => !/过敏原|成分不明/.test(p.reason)).slice(0, 6)) lines.push(P.gray(`- ${p.title}：${p.reason}`));
   // What the store's menu interface actually returned, and what each template code did with it.
@@ -173,7 +172,7 @@ export function renderReport(report, P, { remaining = null } = {}) {
   for (const t of (report.templateCodes || []).filter((t) => t.detail !== 'ok' || t.how !== 'menu').slice(0, 6)) {
     lines.push(P.gray(`  模板 ${t.code}${t.name ? `（${t.name}）` : ''}：${HOW[t.how]}${t.how === 'name' ? ` ${t.storeCode}` : ''} · 详情 ${DETAIL[t.detail] || `出错：${t.error}`}`));
   }
-  if (report.menuFallback) lines.push(P.cyan(`模板套餐这家店用不了，按门店实际菜单补充核价 ${report.menuFallback.tried} 样，成功 ${report.menuFallback.quoted} 样（份量未按几分饱校验）。`));
+  if (report.menuFallback) lines.push(P.cyan(`模板套餐这家店用不了，按门店实际菜单补充核价 ${report.menuFallback.tried} 样，成功 ${report.menuFallback.quoted} 样。`));
   for (const p of report.quotedPlans.filter((p) => p.upgrade && p.kind !== 'alacarte' && pool.has(p.id)).slice(0, 3)) lines.push(P.cyan(`升级算账：${upgradeText(p.upgrade)}`));
   for (const note of report.pricingNotes || []) lines.push(P.cyan(note));
   lines.push(...renderAllergyScreen(report.allergy, P));
@@ -221,7 +220,7 @@ export function renderIntent(intent, mainNames, P, { store = '' } = {}) {
   const avoid = intent.avoidMainCodes.map((c) => mainNames.get(c) || c), want = (intent.wantMainCodes || []).map((c) => mainNames.get(c) || c);
   const d = (key) => intent.defaulted?.includes(key) ? P.gray('（默认）') : '';
   return [
-    `${intent.people} 人${d('people')} · ${intent.portion} 分饱${d('portion')} · 人均 ${money(intent.budgetPerPersonFen)}${d('budgetPerPersonYuan')}`,
+    `${intent.people} 人${d('people')} · 人均 ${money(intent.budgetPerPersonFen)}${d('budgetPerPersonYuan')}`,
     ...(want.length ? [`想吃：${want.join('、')}（单点和含它的套餐一起比价）`] : []),
     `避开：${[intent.avoidRecentDays ? `${intent.avoidRecentDays === 1 ? '昨天' : '前两天'}吃过的主食（读历史订单）` : '', avoid.join('、')].filter(Boolean).join('；') || '无'}`,
     `门店：${store || (intent.city ? `${intent.city} · ${intent.keyword}` : '沿用当前门店')} · 目标：${GOAL_LABELS[intent.goal] || '沿用设置'} · 心情：${MOOD_LABELS[intent.mood] || intent.mood} · 揭晓：${intent.finish === 'wheel' ? '转盘' : '饭搭子双 Agent'}`,
@@ -293,7 +292,7 @@ export const COMMAND_HELP = [
   [['coupons'], '/coupons', '先列可领券（名称 · 可省 · 有效期），再列持有券；只查看，不领取', ['券', '优惠', '券包', '可领']],
   [['claim'], '/claim', '领取全部可领券（先列出可领券，需输入 yes 明确确认）', ['领券', '领取', '券']],
   [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与；也可以说“有什么活动”', ['活动', '日历', '报名']],
-  [['set'], '/set 人数 食量 人均预算', '例：/set 2 7 35（食量 5/7/9）', ['人数', '食量', '预算']],
+  [['set'], '/set 人数 人均预算', '例：/set 2 35', ['人数', '预算']],
   [['avoid'], '/avoid [主食名…|clear]', '查看或切换要避开的主食', ['避开', '不吃', '主食']],
   [['allergy'], '/allergy [过敏原…]', '不带参数列出，带参数添加（如 /allergy 花生 虾）；也可以说“我对花生过敏”', ['过敏', '忌口']],
   [['allergy-clear'], '/allergy-clear 过敏原', '删除一项过敏记录', ['过敏', '删除']],
@@ -323,8 +322,8 @@ export function helpLines(P) {
   const c = (cmd, text) => `${P.cyan(padEnd(cmd, 26))}${text}`;
   return [
     P.bold('直接输入一句话 → Agent 在后台走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选，最后只给一个答案'),
-    P.gray('  例：1人、7分饱、人均30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
-    P.gray(`  没写的默认：${DEFAULT_INTENT.people} 人 · ${DEFAULT_INTENT.portion} 分饱 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
+    P.gray('  例：1人、人均30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
+    P.gray(`  没写的默认：${DEFAULT_INTENT.people} 人 · 人均 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
     P.gray('  /why 查看上一次的完整过程（每一步的结果、两个 Agent 的选择与备选）'),
     P.gray('  输入 / 立即弹出命令面板（按前缀过滤，带说明和关键词）：↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭'),
     `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 就这个 / 要这个 / 下单；到店自取，不支持外送）')}`,

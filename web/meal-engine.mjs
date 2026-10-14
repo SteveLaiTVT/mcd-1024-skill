@@ -279,7 +279,8 @@ async function mapLimited(values, fn, limit = 2) {
   })); return result;
 }
 export function validateRequest(request) {
-  requireValue([1, 2, 3, 4].includes(request.people) && [5, 7, 9].includes(request.portion), '请选择人数和食量。');
+  requireValue([1, 2, 3, 4].includes(request.people), '请选择人数。');
+  requireValue(request.portion == null || [5, 7, 9].includes(request.portion), '食量请选 5、7 或 9。');
   requireValue(amount(request.budgetPerPersonFen) && Number.isSafeInteger(request.people * request.budgetPerPersonFen), '预算金额无效。');
   requireValue(Array.isArray(request.avoidMainCodes) && request.avoidMainCodes.every((c) => typeof c === 'string'), '最近吃过的主食无效。');
 }
@@ -346,8 +347,8 @@ function templateFailure(recipe, codeStatus, names, error) {
 
 export async function prepareWheel(client, templates, context, request, onProgress = () => {}, { names = new Map() } = {}) {
   validateRequest(request); requireValue(context.storeCode && context.beType === 1 && context.orderType === 1, '请先选择到店取餐门店。');
-  const recipes = templates.recipes.filter((r) => r.people === request.people && r.portion === request.portion);
-  requireValue(recipes.length, '暂时没有此人数和食量的餐单。');
+  const recipes = templates.recipes.filter((r) => r.people === request.people && (request.portion == null || r.portion === request.portion));
+  requireValue(recipes.length, request.portion == null ? '暂时没有此人数的餐单。' : '暂时没有此人数和食量的餐单。');
   const benefits = await inspectBenefits(client, context, onProgress), common = pick(context, ['storeCode', 'orderType', 'beType']);
   onProgress({ step: 2, text: '正在读取当前门店的套餐和搭配…', benefits });
   // A failed or odd menu read no longer aborts: every template still tries query-meal-detail, and each failure says why.
@@ -412,7 +413,7 @@ export async function prepareWheel(client, templates, context, request, onProgre
 
 export function prepareDemo(dataset, context, request) {
   validateRequest(request);
-  const plans = dataset.plans.plans.filter((p) => p.people === request.people && p.portion === request.portion && !p.mainCodes.some((c) => request.avoidMainCodes.includes(c)))
+  const plans = dataset.plans.plans.filter((p) => p.people === request.people && (request.portion == null || p.portion === request.portion) && !p.mainCodes.some((c) => request.avoidMainCodes.includes(c)))
     .map((p) => ({ ...clone(p), basePriceFen: p.priceFen, savingFen: 0, couponNames: [], priceLabel: '历史样本价', withinBudget: p.priceFen <= request.people * request.budgetPerPersonFen }))
     .sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
   const candidates = plans.filter((p) => p.withinBudget);

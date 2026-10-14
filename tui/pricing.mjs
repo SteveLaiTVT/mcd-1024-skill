@@ -4,26 +4,25 @@
 import { quoteBest } from '../web/meal-engine.mjs';
 import { money } from './ansi.mjs';
 
-// One main per person is about 5分饱 (mains are 325–485 kcal); for 7 / 9分饱 à la carte is shown for comparison only.
-export const ALACARTE_PORTIONS = Object.freeze([5]);
 // Wanting a specific main: a set meal with it wins if it costs at most this much more per person.
 export const UPGRADE_MAX_FEN_PER_PERSON = 500;
 
 const fen = (yuan) => /^\d+(?:\.\d{1,2})?$/.test(String(yuan)) ? Math.round(Number(yuan) * 100) : null;
 const isAlaCarte = (p) => p.kind === 'alacarte';
 
-// Mains worth pricing alone: every non-avoided main when one main fits the portion, plus wanted mains for the upgrade math.
-export function alaCarteMains(mainNames, request) {
+// Mains worth pricing alone: the mains in the template sets (for the à la carte vs set
+// upgrade math) plus any main the user asked for. Pricing every main would be a
+// calculate-price call each, so the rest stay out of the pool.
+export function alaCarteMains(mainNames, request, templateCodes = new Set()) {
   const avoid = new Set(request.avoidMainCodes || []), want = new Set(request.wantMainCodes || []);
-  const fits = ALACARTE_PORTIONS.includes(request.portion);
-  return [...mainNames].filter(([code]) => !avoid.has(code) && (fits || want.has(code))).map(([code, name]) => ({ code, name }));
+  return [...mainNames].filter(([code]) => !avoid.has(code) && (templateCodes.has(code) || want.has(code))).map(([code, name]) => ({ code, name }));
 }
 
 export function alaCartePlan({ code, name }, request, quote, priceLabel) {
-  const fits = ALACARTE_PORTIONS.includes(request.portion), people = request.people;
-  return { id: `alacarte-${code}`, kind: 'alacarte', people, portion: fits ? request.portion : 5,
+  const people = request.people;
+  return { id: `alacarte-${code}`, kind: 'alacarte', people,
     title: people > 1 ? `${people}人 · 单点${name} × ${people}` : `单点 · ${name}`, wheelTitle: name, wheelKind: '单点主食',
-    packages: [], parts: [{ code, name, quantity: people }], mainCodes: [code], fitsPortion: fits, priceLabel,
+    packages: [], parts: [{ code, name, quantity: people }], mainCodes: [code], priceLabel,
     basePriceFen: quote.basePriceFen, priceFen: quote.priceFen, savingFen: quote.savingFen, couponNames: quote.couponNames || [],
     ...(quote.quotedAt ? { quotedAt: quote.quotedAt } : {}), ...(quote.orderItems ? { orderItems: quote.orderItems, takeWays: quote.takeWays || [] } : {}), withinBudget: quote.priceFen <= people * request.budgetPerPersonFen };
 }
@@ -53,7 +52,7 @@ const byPrice = (a, b) => a.priceFen - b.priceFen || Number(isAlaCarte(a)) - Num
 
 export function mergeAlaCarte(report, { plans = [], failed = [] }) {
   report.quotedPlans = [...report.quotedPlans, ...plans].sort(byPrice);
-  report.candidates = report.quotedPlans.filter((p) => p.withinBudget && p.fitsPortion !== false);
+  report.candidates = report.quotedPlans.filter((p) => p.withinBudget);
   report.failedPlans = [...report.failedPlans, ...failed];
   return report;
 }
@@ -73,8 +72,8 @@ export function applyUpgrades(report, mainNames = new Map()) {
     const set = sets.filter((p) => p.mainCodes?.includes(code)).sort(byPrice)[0];
     if (!set) continue;
     const upgrade = { mainName: name, alaCarteFen: single.priceFen, setFen: set.priceFen, setTitle: set.title, deltaFen: set.priceFen - single.priceFen,
-      extras: extrasOf(set, code), alaCarteFits: single.fitsPortion !== false, wanted: want.has(code) };
-    const setWins = upgrade.deltaFen <= 0 || (want.has(code) && upgrade.deltaFen <= limit) || !upgrade.alaCarteFits;
+      extras: extrasOf(set, code), wanted: want.has(code) };
+    const setWins = upgrade.deltaFen <= 0 || (want.has(code) && upgrade.deltaFen <= limit);
     set.upgrade = { ...upgrade, chosen: setWins ? 'set' : 'alacarte' };
     single.upgrade = { ...set.upgrade };
     if (setWins && report.candidates.includes(single)) dropped.push({ single, set });
@@ -105,6 +104,6 @@ export function upgradeText(u) {
   if (u.deltaFen < 0) return `单点${u.mainName} ${money(u.alaCarteFen)}，套餐只要 ${money(u.setFen)}${extras}，比单点还省 ${money(-u.deltaFen)}`;
   if (u.deltaFen === 0) return `单点${u.mainName} ${money(u.alaCarteFen)}，同价可得套餐${extras}`;
   const head = `单点${u.mainName} ${money(u.alaCarteFen)}，+${money(u.deltaFen)} 可得套餐${extras}`;
-  if (u.chosen === 'set') return u.alaCarteFits ? head : `${head}；单点只够约 5 分饱，所以选套餐`;
+  if (u.chosen === 'set') return head;
   return u.wanted ? `${head}；超过升级线（每人 +${money(UPGRADE_MAX_FEN_PER_PERSON)}），单点更省` : `${head}；单点更省`;
 }

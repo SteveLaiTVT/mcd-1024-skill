@@ -139,7 +139,7 @@ export async function runAgentFlow(session, text, ui, { signal } = {}) {
       }
     }
     check();
-    session.setRequest({ people: intent.people, portion: intent.portion, budgetPerPersonFen: intent.budgetPerPersonFen, avoidMainCodes: [...avoid],
+    session.setRequest({ people: intent.people, budgetPerPersonFen: intent.budgetPerPersonFen, avoidMainCodes: [...avoid],
       wantMainCodes: (intent.wantMainCodes || []).filter((c) => !avoid.has(c)) });
     if (intent.goal) session.preferences = { ...session.preferences, goal: intent.goal };
 

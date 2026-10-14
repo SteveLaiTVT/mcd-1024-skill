@@ -17,18 +17,17 @@ const stripCoupons = ({ couponId, couponCode, ...rest }) => ({ ...rest });
 export const snapshotMenu = (menu) => (menu?.items || []).map((i) => ({ code: i.productCode, name: i.name, category: '',
   priceFen: /^\d+(?:\.\d{1,2})?$/.test(String(i.menuPriceYuan)) ? Math.round(Number(i.menuPriceYuan) * 100) : null }));
 
-// Menu items to price when no template works: food only, sets first for 7 / 9分饱, cheapest first.
+// Menu items to price when no template works: food only, sets first, cheapest first.
 // Nothing within the budget → the cheapest ones anyway, so the answer can say what the budget would need.
 export function fallbackPicks(items, request, limit = MENU_FALLBACK_LIMIT) {
   const food = items.filter((m) => m.name && m.priceFen != null && MEALISH.test(m.name) && !isDrink(m.name));
-  const within = food.filter((m) => m.priceFen <= request.budgetPerPersonFen), sets = request.portion > 5;
-  return (within.length ? within : food).sort((a, b) => (sets ? Number(!SET.test(a.name)) - Number(!SET.test(b.name)) : 0) || byMenuPrice(a, b)).slice(0, limit);
+  const within = food.filter((m) => m.priceFen <= request.budgetPerPersonFen);
+  return (within.length ? within : food).sort((a, b) => (Number(!SET.test(a.name)) - Number(!SET.test(b.name))) || byMenuPrice(a, b)).slice(0, limit);
 }
 
-// portion: null — a menu item's fullness is not verified, so it is never claimed to match 几分饱.
 export function menuPlan(item, cart, request, quote, mainCodes = new Set()) {
   const people = request.people, name = cart.name || item.name;
-  return { id: `menu-${item.code}`, kind: 'menu', people, portion: null, title: people > 1 ? `${people}人 · ${name} × ${people}` : name,
+  return { id: `menu-${item.code}`, kind: 'menu', people, title: people > 1 ? `${people}人 · ${name} × ${people}` : name,
     wheelTitle: name, wheelKind: '门店菜单', packages: cart.items[0]?.roundList ? [{ productCode: item.code, name, quantity: people }] : [],
     parts: cart.parts, mainCodes: [...new Set(cart.parts.filter((p) => mainCodes.has(p.code)).map((p) => p.code))], priceLabel: '官方核价（门店实际菜单）',
     basePriceFen: quote.basePriceFen, priceFen: quote.priceFen, savingFen: quote.savingFen, couponNames: quote.couponNames || [], quotedAt: quote.quotedAt,
@@ -88,17 +87,12 @@ export function emptyCause(report) {
     const wantedQuoted = quoted.filter((p) => p.mainCodes?.some((c) => want.has(c)));
     if (wantedQuoted.length) {
       const cheapest = [...wantedQuoted].sort((a, b) => a.priceFen - b.priceFen)[0];
-      // The cheapest wanted plan may be out of the pool for a non-budget reason: an
-      // à la carte single at 7 分饱 fits the budget but not the portion. Only say
-      // 'raise the budget' when the blocker really is the price.
-      const portionBlocked = cheapest.withinBudget && cheapest.fitsPortion === false;
-      return { cause: 'want', cheapest, names: report.wantMissed.names || '', overBudget: !portionBlocked && !cheapest.withinBudget, portionBlocked };
+      return { cause: 'want', cheapest, names: report.wantMissed.names || '', overBudget: !cheapest.withinBudget };
     }
     return { cause: 'want', cheapest: null, names: report.wantMissed.names || '' };
   }
-  const fits = quoted.filter((p) => p.fitsPortion !== false);
-  if (fits.length && !fits.some((p) => p.withinBudget)) {
-    const cheapest = [...fits].sort((a, b) => a.priceFen - b.priceFen)[0];
+  if (quoted.length && !quoted.some((p) => p.withinBudget)) {
+    const cheapest = [...quoted].sort((a, b) => a.priceFen - b.priceFen)[0];
     return { cause: 'budget', cheapest, perPersonFen: Math.ceil(cheapest.priceFen / people) };
   }
   if (quoted.some((p) => p.withinBudget) || report.allergy?.excluded?.length || (report.excludedPlans || []).length) return { cause: 'filtered' };
@@ -125,10 +119,6 @@ export function renderEmpty(report, P) {
     const names = why.names || '你点的';
     if (why.cheapest) {
       const c = why.cheapest, perPerson = Math.ceil(c.priceFen / (r.people || 1));
-      if (why.portionBlocked) {
-        return { title: '你点的只有单点，不够分饱', lines: [P.yellow(`「${c.title}」${money(c.priceFen)}只有约 5 分饱，不够你说的 ${r.portion} 分饱；套餐里没有含「${names}」的。`),
-          `想吃的话，说“5分饱”就能单点它。`, ...showMenu, P.gray('/why 查看核价明细')] };
-      }
       return { title: '预算内没有你点的', lines: [P.yellow(`预算内没有含「${names}」的选项。最便宜的含你点的是「${c.title}」${money(c.priceFen)}${r.people > 1 ? `（人均约 ${money(perPerson)}）` : ''}。`),
         `把人均预算提到 ${money(perPerson)} 就能选它，例如说“人均 ${Math.ceil(perPerson / 100)}”。`, ...showMenu, P.gray('/why 查看核价明细')] };
     }
@@ -136,7 +126,7 @@ export function renderEmpty(report, P) {
   }
   if (why.cause === 'filtered') {
     return { title: '都被筛掉了', lines: [P.yellow('有报价，但都被你的条件排除了，不是预算问题。'),
-      [allergyOut ? `过敏筛选排除了 ${allergyOut} 份（不会为了凑数放宽）` : '', (report.excludedPlans || []).some((p) => /避开/.test(p.reason)) ? '避开项排除了一部分' : '', '单点主食只够约 5 分饱时不进 7 / 9 分饱的候选'].filter(Boolean).join('；') + '。',
+      [allergyOut ? `过敏筛选排除了 ${allergyOut} 份（不会为了凑数放宽）` : '', (report.excludedPlans || []).some((p) => /避开/.test(p.reason)) ? '避开项排除了一部分' : ''].filter(Boolean).join('；') + '。',
       P.gray('/why 查看每一份被排除的原因')] };
   }
   if (why.cause === 'api') {

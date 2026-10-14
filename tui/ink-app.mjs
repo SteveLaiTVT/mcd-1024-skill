@@ -3,10 +3,10 @@
 //   … output log (Ink <Static>: written once, scrolls in the terminal's own scrollback) …
 //   ⠹ 为你挑选这一餐 · 5/6 查券与官方整单核价   3.2s       ← only while something runs
 //   ╭──────────────────────────────────────────────╮
-//   │ › 1人 7分饱 人均30█                           │    ← input box
+//   │ › 1人 人均30█                                  │    ← input box
 //   ╰──────────────────────────────────────────────╯
 //     ❯ /cart [rm <hash>|clear]  查看购物车…  · 购物车 清单   ← '/' palette, only while typing '/…'
-//   样本模式 · 门店 · 1人 7分饱 人均¥25 · 未核价 · 本地偏好    ← status line
+//   样本模式 · 门店 · 1人 人均¥25 · 未核价 · 本地偏好    ← status line
 //
 // Keys are read by Ink's useInput in raw mode, so '/' opens the palette on the keystroke itself.
 // Command logic lives in shell.mjs; this file only owns the screen and the keys.
@@ -19,7 +19,7 @@ import { statusLine } from './render.mjs';
 
 const h = React.createElement;
 export const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'];
-export const PLACEHOLDER = '说一句话，比如“1人 7分饱 人均30”；输入 / 打开命令面板';
+export const PLACEHOLDER = '说一句话，比如“1人 人均30”；输入 / 打开命令面板';
 export const STATUS_KEYS = '  · / 命令 · /why 过程 · Ctrl+C 退出';
 const CLEAR_SCREEN = '\x1b[2J\x1b[3J\x1b[H';
 

@@ -23,6 +23,13 @@ test('price questions route to a direct lookup, pick questions do not', () => {
   assert.equal(parsePriceQuery('那我这个预算有什么好的套餐推荐吗'), null);
 });
 
+test('price question with sentence noise extracts only the food phrase, never the sentence', () => {
+  assert.equal(parsePriceQuery('领完优惠券我也吃不了牛肉汉堡吗？我想搞个套餐的话多少钱')?.item, '牛肉汉堡');
+  assert.equal(parsePriceQuery('双层吉士汉堡多少钱', new Map([['B2', '双层吉士汉堡']]))?.item, '双层吉士汉堡');
+  assert.equal(parsePriceQuery('大堡口福三件套多少钱', new Map([['B4', '大堡口福']]))?.item, '大堡口福三件套');
+  assert.equal(parsePriceQuery('牛肉汉堡套餐多少钱')?.item, '牛肉汉堡套餐');
+});
+
 test('emptyCause names the real cause; only budget may suggest raising the budget', () => {
   const base = { quotedPlans: [], failedPlans: [], excludedPlans: [], request: { people: 1, budgetPerPersonFen: 2500 }, menu: { ok: true, items: [] } };
   assert.equal(emptyCause({ ...base, quotedPlans: [{ fitsPortion: true, withinBudget: false, priceFen: 3000, title: 'X' }] }).cause, 'budget');
@@ -42,7 +49,7 @@ test('emptyCause names the real cause; only budget may suggest raising the budge
   assert(menuCard.lines.join('').includes('提高预算也没用'), 'menu failure must say raising the budget does not help');
 });
 
-test('when every template detail call fails, the quote falls back to the store menu instead of answering empty', async () => {
+test('when every template detail call fails, the quote still returns à la carte singles (no menu fallback needed)', async () => {
   const [templates, plans, offers, campaigns] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns'].map(json));
   const dataset = { templates, plans, offers, campaigns };
   const calls = [];
@@ -52,6 +59,34 @@ test('when every template detail call fails, the quote falls back to the store m
   for (const code of [...new Set(templates.recipes.flatMap((r) => r.ingredients.map((i) => i.productCode)))]) menuMeals[code] = {};
   const factory = () => ({ initialize: async () => {}, close() {}, async call(name, args = {}) {
     calls.push(name);
+    if (name === 'now-time-info') return { data: { datetime: '2026-10-14T10:30:00+08:00' } };
+    if (name === 'query-my-coupons') return { data: { currentPage: 1, totalPages: 1, totalCount: 0, coupons: [] } };
+    if (name === 'query-store-coupons') return { data: [] };
+    if (name === 'campaign-calendar') return { data: { dailyList: [] } };
+    if (name === 'available-coupons') return { data: [] };
+    if (name === 'query-meals') return { data: { meals: menuMeals } };
+    if (name === 'query-meal-detail') throw new Error('麦当劳未完成这次业务请求，请检查 Token 或稍后重查。');
+    if (name === 'calculate-price') return { data: { price: 2200 }, datetime: '2026-10-14T10:30:00+08:00' };
+    throw new Error(`Unexpected tool ${name}`);
+  } });
+  const session = new TuiSession({ dataset, env: { MCD_TOKEN: 'test' }, mcpFactory: factory });
+  await session.connect();
+  session.selectStore({ storeCode: 'S1', storeName: '测试餐厅' }, '深圳');
+  const report = await session.quote();
+  // The template SETS failed (query-meal-detail), but the à la carte singles price via
+  // calculate-price, which does not need the set details — so the quote still has candidates.
+  assert(!report.menuFallback, 'the menu fallback is not needed when singles price');
+  assert(report.candidates.length > 0, 'singles must produce candidates, not an empty answer');
+  assert(report.candidates.every((p) => p.kind === 'alacarte'), 'candidates come from the singles');
+});
+
+test('when template sets and singles both fail, the quote falls back to the store menu', async () => {
+  const [templates, plans, offers, campaigns] = await Promise.all(['plan-recipes', 'meal-plans', 'coupon-offers', 'campaigns'].map(json));
+  // No template mains → no singles to price, so the store-menu fallback is the only path left.
+  const dataset = { templates: { ...templates, mainProductCodes: [] }, plans, offers, campaigns };
+  const menuMeals = { '8800001': { name: '巨无霸套餐', currentPrice: '25.00' }, '8800002': { name: '牛肉堡', currentPrice: '13.50' } };
+  for (const code of [...new Set(templates.recipes.flatMap((r) => r.ingredients.map((i) => i.productCode)))]) menuMeals[code] = {};
+  const factory = () => ({ initialize: async () => {}, close() {}, async call(name, args = {}) {
     if (name === 'now-time-info') return { data: { datetime: '2026-10-14T10:30:00+08:00' } };
     if (name === 'query-my-coupons') return { data: { currentPage: 1, totalPages: 1, totalCount: 0, coupons: [] } };
     if (name === 'query-store-coupons') return { data: [] };

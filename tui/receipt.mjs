@@ -14,16 +14,16 @@ export const RECEIPT_WIDTH = 40;
 const WIDTH = RECEIPT_WIDTH;
 
 // Snapshot taken at pick time so /receipt, /commit and /radar still work after the quote expires.
-// Besides the receipt fields it keeps the inputs the radar chart needs: requested portion, budget
-// and wanted mains, the pick's mains and portion, and its price rank among this round's candidates.
+// Besides the receipt fields it keeps the inputs the radar chart needs: budget and wanted
+// mains, the pick's mains, and its price rank among this round's candidates.
 export function receiptFrom(plan, { storeName, at, report }) {
   const request = report?.request || {}, candidates = report?.candidates || [];
   const cheaper = candidates.filter((p) => Number.isSafeInteger(p.priceFen) && p.priceFen < plan.priceFen).length;
   return { title: plan.title, parts: (plan.parts || []).map((p) => ({ name: p.name, quantity: p.quantity })), priceFen: plan.priceFen,
     savingFen: plan.savingFen > 0 ? plan.savingFen : 0, couponNames: [...(plan.couponNames || [])], storeName: storeName || '未选门店',
     at: new Date(at).toISOString(), people: request.people || plan.people || 1, sample: report?.sourceKind === 'demo-snapshot',
-    mainCodes: [...(plan.mainCodes || [])], portion: Number.isSafeInteger(plan.portion) ? plan.portion : null,
-    request: { portion: request.portion ?? null, budgetPerPersonFen: request.budgetPerPersonFen ?? null, wantMainCodes: [...(request.wantMainCodes || [])] },
+    mainCodes: [...(plan.mainCodes || [])],
+    request: { budgetPerPersonFen: request.budgetPerPersonFen ?? null, wantMainCodes: [...(request.wantMainCodes || [])] },
     priceRank: candidates.length ? { cheaper, of: candidates.length } : null };
 }
 

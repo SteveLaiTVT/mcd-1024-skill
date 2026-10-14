@@ -8,7 +8,7 @@ export function prepareAgentInput(report, settings, context, mood = 'normal') {
   const avoided = new Set(report.request.avoidMainCodes || []), ids = new Set();
   const candidates = report.candidates.filter((p) => {
     require(p && clean(p.id, 100) === p.id && p.id && !ids.has(p.id)); ids.add(p.id);
-    require(Number.isSafeInteger(p.priceFen) && p.priceFen >= 0 && p.priceFen <= report.request.totalBudgetFen && p.people === report.request.people && (p.portion == null || p.portion === report.request.portion) && !p.mainCodes?.some((code) => avoided.has(code)));
+    require(Number.isSafeInteger(p.priceFen) && p.priceFen >= 0 && p.priceFen <= report.request.totalBudgetFen && p.people === report.request.people && (report.request.portion == null || p.portion == null || p.portion === report.request.portion) && !p.mainCodes?.some((code) => avoided.has(code)));
     return true;
   });
   require(candidates.length > 0);
@@ -28,7 +28,7 @@ export function prepareAgentInput(report, settings, context, mood = 'normal') {
   const shortlist = scored.slice(0, 12);
   const eligibleIds = shortlist.filter((p) => settings.goal !== 'cheapest' || p.plan.priceFen === minimum).map((p) => p.plan.id);
   return { scored: shortlist, input: { schemaVersion: 1, goal: settings.goal, mood, persona: settings.persona, personalPreferences: settings.personalPrompt,
-    constraints: { people: report.request.people, portion: report.request.portion, totalBudgetFen: report.request.totalBudgetFen },
+    constraints: { people: report.request.people, totalBudgetFen: report.request.totalBudgetFen },
     source: { kind: report.sourceKind, checkedAt: report.checkedAt, comparisonComplete: report.priceComparisonComplete, scope: '当前已核价候选范围' },
     context: { calendar: context.calendar, weather: context.weather },
     memory: memory.map(({ code, ...rest }) => rest), eligibleIds, candidates: shortlist.map((p) => p.data) } };

@@ -60,25 +60,6 @@ test('no wanted main in the pool → no silent substitution; the empty card name
   assert(!card.lines.join('').includes('酥脆无双'), 'the card must not substitute chicken');
 });
 
-test('wanted main only as a portion-blocked single → the card says portion, never budget', () => {
-  const report = {
-    quotedPlans: [
-      { id: 'chicken', kind: 'set', title: '酥脆无双套餐', mainCodes: ['C1'], priceFen: 2050, withinBudget: true, fitsPortion: true, parts: [] },
-      { id: 'beef-single', kind: 'alacarte', title: '单点 · 双层吉士汉堡', mainCodes: ['B2'], priceFen: 2300, withinBudget: true, fitsPortion: false, parts: [] },
-    ],
-    candidates: [{ id: 'chicken', kind: 'set', title: '酥脆无双套餐', mainCodes: ['C1'], priceFen: 2050, withinBudget: true, fitsPortion: true, parts: [] }],
-    excludedPlans: [], request: { people: 1, portion: 7, budgetPerPersonFen: 2500, wantMainCodes: ['B2'] },
-  };
-  applyUpgrades(report, mainNames);
-  assert.deepEqual(report.candidates, []);
-  const cause = emptyCause(report);
-  assert.equal(cause.cause, 'want');
-  assert.equal(cause.portionBlocked, true, 'the blocker is portion (7 分饱), not budget (¥23 ≤ ¥25)');
-  const card = renderEmpty(report, P);
-  assert.equal(card.title, '你点的只有单点，不够分饱');
-  assert(!card.lines.join('').includes('把人均预算提到'), 'budget is already enough — never suggest raising it');
-  assert(card.lines.join('').includes('5分饱'), 'the card says 5 分饱 singles fit');
-});
 test('wanted main nowhere in the quotes → the card says the store does not have it', () => {
   const report = {
     quotedPlans: [{ id: 'chicken', kind: 'set', title: '酥脆无双套餐', mainCodes: ['C1'], priceFen: 2050, parts: [] }],

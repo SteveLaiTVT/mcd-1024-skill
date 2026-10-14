@@ -1,12 +1,12 @@
-// /radar spider chart for the current pick. Five axes, each normalised to 0..1 and
+// /radar spider chart for the current pick. Four axes, each normalised to 0..1 and
 // computed only from data the session really has: the pick snapshot (price, budget,
-// portion, coupon saving), the order history read by /radar, and the user's own
+// coupon saving), the order history read by /radar, and the user's own
 // /like · /less feedback and "想吃" mains. No nutrition or health data is used or
 // invented; an axis without data is shown as "无数据" and drawn at 0.
 import { money, textWidth } from './ansi.mjs';
 
 export const NO_PICK_RADAR = '先选一餐，再看雷达图';
-export const RADAR_NOTE = '五个维度都由本次核价、餐量设置、历史订单和你的反馈算出；不含营养或健康数据。';
+export const RADAR_NOTE = '四个维度都由本次核价、历史订单和你的反馈算出；不含营养或健康数据。';
 const clamp = (v) => Math.max(0, Math.min(1, v));
 const RECENT_ORDERS = 6; // Same window as the 最近吃了啥 list.
 
@@ -15,9 +15,6 @@ export function radarAxes(r, { history = null, feedback = [], mainNames = new Ma
   const name = (code) => mainNames.get(code) || code;
   const budget = r.request?.budgetPerPersonFen > 0 ? r.request.budgetPerPersonFen * (r.people || 1) : null;
   const price = budget == null ? null : clamp((budget - r.priceFen) / budget); // share of the budget left over
-
-  const want = r.request?.portion, have = r.portion;
-  const portion = want && have ? clamp(1 - Math.abs(want - have) / 4) : null;
 
   const recent = history?.orders?.slice(0, RECENT_ORDERS) || [], eaten = new Set(recent.flatMap((o) => o.mainCodes || []));
   const mains = r.mainCodes || [], fresh = mains.filter((c) => !eaten.has(c));
@@ -36,8 +33,6 @@ export function radarAxes(r, { history = null, feedback = [], mainNames = new Ma
   return [
     { key: 'price', label: '价格友好度', value: price,
       basis: budget == null ? '没有预算数据' : `整单 ${money(r.priceFen)} / 预算 ${money(budget)}，预算剩 ${Math.round(price * 100)}%` },
-    { key: 'portion', label: '饱腹匹配', value: portion,
-      basis: portion == null ? '没有食量数据' : `这份约 ${have} 分饱 / 你要 ${want} 分饱` },
     { key: 'novelty', label: '口味新鲜度', value: novelty,
       basis: !history ? '未读到历史订单' : !mains.length ? '这份没有可识别的主食'
         : `主食 ${mains.length} 种里 ${fresh.length} 种不在最近 ${recent.length} 单${history.sourceKind === 'demo-history' ? '（对比的是虚构示例历史）' : ''}` },
@@ -51,7 +46,7 @@ export function radarAxes(r, { history = null, feedback = [], mainNames = new Ma
 
 const fmt = (v) => (v == null ? '无数据' : v.toFixed(2));
 
-// ASCII spider chart: grid pentagons at 50% / 100%, spokes, the value polygon, axis labels with values.
+// ASCII spider chart: grid polygons at 50% / 100%, spokes, the value polygon, axis labels with values.
 export function renderRadarChart(axes, P, { rx = 14, ry = 7 } = {}) {
   const W = 64, cx = 32, cy = ry + 1, H = 2 * ry + 4;
   const cells = Array.from({ length: H }, () => Array.from({ length: W }, () => ({ ch: ' ', tone: null })));
