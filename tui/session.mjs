@@ -269,20 +269,46 @@ export class TuiSession {
       : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames, signal });
     if (report.menu?.ok) this.menu = { storeCode: context.storeCode, items: report.menu.items, shape: report.menu.shape };
     const setsQuoted = report.quotedPlans.length;
+    // An abort (the 10s budget is shorter than 40-50 MCP calls) can land in ANY phase, not
+    // just prepareWheel: catch it per-stage and keep the quotes we already have as a partial
+    // report, instead of letting it kill the whole flow. Only rethrow when nothing was quoted.
+    const aborted = () => signal?.aborted;
+    const notePartial = (note) => {
+      report.partial = true;
+      report.partialNote = [report.partialNote, note].filter(Boolean).join('；');
+    };
+    const runStage = async (stageNote, fn) => {
+      try { return await fn(); }
+      catch (e) {
+        if (!aborted()) throw e;
+        if (!report.quotedPlans.length) throw e; // nothing to show: let the abort surface
+        notePartial(stageNote);
+        return null;
+      }
+    };
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
     const mains = alaCarteMains(this.mainNames, request, new Set(this.dataset.templates.mainProductCodes));
-    const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
-      : report.partial ? {} // Aborted mid-quote: the extra menu phases would throw on the dead signal; keep what we have.
-      : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress, { signal }) : {};
+    let singles = {};
+    if (this.demo) {
+      singles = { plans: demoAlaCarte(this.dataset.menu, mains, request) };
+    } else if (!report.partial && mains.length && setsQuoted < 5) {
+      // liveAlaCarte is nice-to-have: skip its 8+ calls when prepareWheel already quoted enough.
+      // (report.partial also skips: the signal is dead, the extra phases would throw on it.)
+      singles = await runStage('单点主食核价未完成', () =>
+        liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress, { signal })) || {};
+    }
     mergeAlaCarte(report, singles);
     // No template priced at this store (not a budget problem): price what the store's own menu offers instead.
     if (!this.demo && !report.partial && !setsQuoted && !report.candidates.length && report.menu?.ok) {
       const picks = fallbackPicks(report.menu.items, request);
       if (picks.length) {
-        const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress, { signal });
-        mergeAlaCarte(report, extra);
-        report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
-        report.menuFallback = { tried: picks.length, quoted: extra.plans.length };
+        const extra = await runStage('门店菜单补位核价未完成', () =>
+          liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress, { signal }));
+        if (extra) {
+          mergeAlaCarte(report, extra);
+          report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
+          report.menuFallback = { tried: picks.length, quoted: extra.plans.length };
+        }
       }
     }
     applyAllergyFilter(report, this.#allergies);
@@ -300,10 +326,13 @@ export class TuiSession {
     }
     // Ingredient prefetch targets the ranked candidates' own product codes, not the
     // menu at large: the old menu-wide prefetch answered "有什么料" with unrelated meals.
+    // Best-effort enrichment: an abort here is swallowed as "details stay unprefetched"
+    // and never touches the report's partial state (the quotes themselves are done).
     if (!this.demo && this.#mcp) {
       try { Object.assign(this.detailCache, await prefetchCandidateDetails(this.#mcp, context, report.candidates, { signal })); }
       catch { this.dataIncomplete = true; }
     }
+    // Same best-effort rule for the coupon value table: never throws, never flips partial.
     try {
       if (this.demo) {
         const top = report.candidates[0];

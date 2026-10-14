@@ -492,3 +492,89 @@ test('quoteBest quotes coupon variants in parallel and takes the minimum', async
   assert.equal(q.orderItems.find((i) => i.couponId)?.couponId, 'c2');
   assert.equal(q.successfulCouponQuotes, 2);
 });
+
+// Abort lands in liveAlaCarte (after prepareWheel finished 2/2): the quote must keep
+// prepareWheel's candidates as a partial report instead of dying with 已取消.
+test('quote: abort in liveAlaCarte returns prepareWheel candidates as partial', async () => {
+  const templates = {
+    recipes: [
+      { id: 'r1', people: 1, title: '套餐一', ingredients: [{ productCode: 'P1', quantity: 1 }] },
+      { id: 'r2', people: 1, title: '套餐二', ingredients: [{ productCode: 'P2', quantity: 1 }] },
+    ],
+    mainProductCodes: ['M1', 'M2', 'M3'],
+  };
+  const plans = { plans: [{ parts: [{ code: 'M1', name: '主食一' }, { code: 'M2', name: '主食二' }, { code: 'M3', name: '主食三' }] }] };
+  const dataset = { templates, plans, offers: {}, campaigns: {}, menu: { items: [] } };
+  const controller = new AbortController();
+  let mDetailCalls = 0;
+  const factory = () => ({ initialize: async () => {}, close() {}, async call(name, args = {}, opts = {}) {
+    if (opts?.signal?.aborted) throw new Error('已取消。');
+    switch (name) {
+      case 'now-time-info': return { data: { datetime: '2026-10-14 12:00:00' } };
+      case 'available-coupons': return { data: [] };
+      case 'query-my-coupons': return { data: { currentPage: 1, coupons: [], totalCount: 0, totalPages: 1 } };
+      case 'query-store-coupons': return { data: [] };
+      case 'campaign-calendar': return { data: { dailyList: [] } };
+      case 'query-meals': return { data: { meals: [] } };
+      case 'query-meal-detail': {
+        const code = args.code;
+        if (templates.mainProductCodes.includes(code)) {
+          mDetailCalls++;
+          // Abort lands on the 2nd à la carte main: M1 quoted, M2 dies mid-detail.
+          if (mDetailCalls === 2) { controller.abort(); throw new Error('已取消。'); }
+          return { data: { code, name: `主食${code}` } };
+        }
+        // Choice code must be a mainProductCode or buildCart rejects the recipe.
+        return { data: { code, name: `套餐${code}`, rounds: [{ id: '1', quantity: 1, choices: [{ code: 'M1', name: '主食', quantity: 1, isDefault: true }] }] } };
+      }
+      case 'calculate-price': return { data: { price: 2000 }, datetime: '2026-10-14 12:00:00' };
+      default: throw new Error(`unexpected call ${name}`);
+    }
+  } });
+  const session = new TuiSession({ dataset, env: { MCD_TOKEN: 'test' }, mcpFactory: factory });
+  await session.connect();
+  session.selectStore({ storeCode: 'S1', storeName: '测试餐厅' }, '深圳');
+  const report = await session.quote(() => {}, { signal: controller.signal });
+  assert.equal(report.partial, true, 'abort becomes partial, the flow does not die');
+  assert.match(report.partialNote, /单点主食核价未完成/);
+  assert(report.candidates.length >= 2, 'prepareWheel candidates survive the abort');
+  assert(report.candidates.every((p) => p.priceFen > 0), 'survivors are quotable');
+});
+
+// Stage priority: prepareWheel already quoted ≥5 → liveAlaCarte (nice-to-have) is skipped,
+// saving its 8+ MCP calls. Asserted by counting à la carte detail calls.
+test('quote: liveAlaCarte skipped when prepareWheel already quoted 5+', async () => {
+  const templates = {
+    recipes: ['r1', 'r2', 'r3', 'r4', 'r5', 'r6'].map((id, i) => ({ id, people: 1, title: `套餐${i + 1}`, ingredients: [{ productCode: `P${i + 1}`, quantity: 1 }] })),
+    mainProductCodes: ['M1', 'M2', 'M3'],
+  };
+  const plans = { plans: [{ parts: [{ code: 'M1', name: '主食一' }, { code: 'M2', name: '主食二' }, { code: 'M3', name: '主食三' }] }] };
+  const dataset = { templates, plans, offers: {}, campaigns: {}, menu: { items: [] } };
+  let mDetailCalls = 0;
+  const factory = () => ({ initialize: async () => {}, close() {}, async call(name, args = {}, opts = {}) {
+    if (opts?.signal?.aborted) throw new Error('已取消。');
+    switch (name) {
+      case 'now-time-info': return { data: { datetime: '2026-10-14 12:00:00' } };
+      case 'available-coupons': return { data: [] };
+      case 'query-my-coupons': return { data: { currentPage: 1, coupons: [], totalCount: 0, totalPages: 1 } };
+      case 'query-store-coupons': return { data: [] };
+      case 'campaign-calendar': return { data: { dailyList: [] } };
+      case 'query-meals': return { data: { meals: [] } };
+      case 'query-meal-detail': {
+        const code = args.code;
+        if (templates.mainProductCodes.includes(code)) mDetailCalls++;
+        // Choice code must be a mainProductCode or buildCart rejects the recipe.
+        return { data: { code, name: `品${code}`, rounds: [{ id: '1', quantity: 1, choices: [{ code: 'M1', name: '主食', quantity: 1, isDefault: true }] }] } };
+      }
+      case 'calculate-price': return { data: { price: 2000 }, datetime: '2026-10-14 12:00:00' };
+      default: throw new Error(`unexpected call ${name}`);
+    }
+  } });
+  const session = new TuiSession({ dataset, env: { MCD_TOKEN: 'test' }, mcpFactory: factory });
+  await session.connect();
+  session.selectStore({ storeCode: 'S1', storeName: '测试餐厅' }, '深圳');
+  const report = await session.quote(() => {}, {});
+  assert.equal(mDetailCalls, 0, 'liveAlaCarte skipped: no à la carte detail calls');
+  assert(!report.partial, 'no abort, no partial');
+  assert(report.candidates.length >= 5, 'prepareWheel candidates are enough on their own');
+});
