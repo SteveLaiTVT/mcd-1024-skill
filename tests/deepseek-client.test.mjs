@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DeepSeekClient, DEEPSEEK_ENDPOINT, DEEPSEEK_MODEL } from '../web/deepseek-client.mjs';
+import { DeepSeekClient, DEEPSEEK_ENDPOINT, DEEPSEEK_MODEL } from '../core/llm.mjs';
 const completion = (extra = {}) => ({ model: 'deepseek-flash', choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '{"choices":[],"vibe":"cozy"}' } }], ...extra });
 test('DeepSeek sends a bounded non-thinking JSON request only to the official endpoint without cookies or tools', async () => {
   const requests = [], client = new DeepSeekClient('Bearer fake-deepseek-key', { fetchImpl: async (url, options) => { requests.push({ url, options }); return new Response(JSON.stringify(completion())); } });
   await client.complete('output JSON', { candidates: [] });
   const [{ url, options }] = requests, body = JSON.parse(options.body);
   assert.equal(url, DEEPSEEK_ENDPOINT); assert.equal(options.headers.Authorization, 'Bearer fake-deepseek-key');
-  assert.equal(options.credentials, 'omit'); assert.equal(options.redirect, 'error'); assert.equal(options.referrerPolicy, 'no-referrer');
+  assert.equal(options.redirect, 'error'); assert.equal(options.credentials, undefined); assert.equal(options.referrerPolicy, undefined);
   assert.equal(body.model, DEEPSEEK_MODEL); assert.deepEqual(body.thinking, { type: 'disabled' }); assert.deepEqual(body.response_format, { type: 'json_object' });
   assert.equal(body.max_tokens, 1200); assert.equal(body.stream, false); assert(!('tools' in body)); assert(!JSON.stringify(body).includes('fake-deepseek-key'));
   client.close(); await assert.rejects(client.complete('JSON', {}), (e) => e.code === 'cancelled');

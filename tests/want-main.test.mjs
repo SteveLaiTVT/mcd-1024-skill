@@ -5,7 +5,6 @@
 // contain no literal space (some scanners/browsers truncate at it).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLocalIntent } from '../tui/intent.mjs';
 import { applyUpgrades } from '../tui/pricing.mjs';
 import { emptyCause, renderEmpty } from '../tui/menu.mjs';
 import { createPalette } from '../tui/ansi.mjs';
@@ -17,22 +16,6 @@ const mainNames = new Map([
   ['B4', '大堡口福'], ['B5', '德克萨斯风味三层肉霸堡'],
   ['C1', '麦辣鸡腿汉堡'], ['C2', '板烧鸡腿堡'], ['F1', '麦香鱼'],
 ]);
-
-test('generic meat words map to every main of that meat; negated meat avoids it', () => {
-  const beef = parseLocalIntent('我今天想吃牛肉汉堡，有没有适合的推荐', mainNames).wantMainCodes;
-  assert.deepEqual([...beef].sort(), ['B1', 'B2', 'B3', 'B4', 'B5'], '牛肉汉堡 → all beef mains, no chicken (incl. 大堡口福/肉霸, whose names carry no 牛)');
-  assert.deepEqual(parseLocalIntent('不要牛肉', mainNames).avoidMainCodes?.sort(), ['B1', 'B2', 'B3', 'B4', 'B5']);
-  assert.equal(parseLocalIntent('不要牛肉', mainNames).wantMainCodes, undefined, 'negated meat is never wanted');
-  const mixed = parseLocalIntent('不要牛肉，想吃鸡', mainNames);
-  assert.deepEqual(mixed.avoidMainCodes?.sort(), ['B1', 'B2', 'B3', 'B4', 'B5']);
-  assert.deepEqual(mixed.wantMainCodes?.sort(), ['C1', 'C2']);
-  assert.equal(parseLocalIntent('不要牛奶', mainNames).avoidMainCodes, undefined, '牛奶 is milk, not beef');
-  assert.deepEqual(parseLocalIntent('我想吃巨无霸', mainNames).wantMainCodes, ['B1'], 'literal product names still match');
-  assert.deepEqual(parseLocalIntent('想吃鱼', mainNames).wantMainCodes, ['F1']);
-  // Negating one specific product must not avoid the whole meat class.
-  assert.deepEqual(parseLocalIntent('不要麦辣鸡腿汉堡', mainNames).avoidMainCodes, ['C1']);
-  assert.equal(parseLocalIntent('不要麦辣鸡腿汉堡', mainNames).wantMainCodes, undefined);
-});
 
 test('no wanted main in the pool → no silent substitution; the empty card names the wanted main', () => {
   const beef = ['B1', 'B2', 'B3'];
@@ -78,7 +61,7 @@ test('card URL has no literal space; the time round-trips with its space', () =>
     at: '2026-10-14T11:03:00+08:00', parts: [{ name: '麦麦脆汁鸡-琵琶腿', quantity: 1 }], sample: false };
   const { url } = cardUrl(r);
   assert(!url.includes(' '), 'a literal space is invalid in a URL and truncates some scanners');
-  assert(url.includes('%20'), 'the space is percent-encoded');
+  assert.match(url, /#b64\.[A-Za-z0-9_-]+$/);
   const back = decodeCard(url.split('#')[1]);
   assert.equal(back.at, '10-14 11:03', 'the card page decodes the space back');
   assert.equal(back.t, '酥脆无双套餐');

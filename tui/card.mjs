@@ -1,15 +1,9 @@
-// Meal-card link for the receipt QR: CARD_BASE_URL + '#' + delimited UTF-8 data.
-// Format: v1~title~priceFen~store~time~sp~items~note
-// items = name*qty,name*qty (empty = no items, '-' = items dropped for size).
-// The '~', ',', '*', '\', '%' inside a field value are percent-encoded, so a literal
-// '~' / ',' / '*' in the fragment is always a structural separator and a plain
-// split is safe. Delimited (not base64url JSON): base64 inflates Chinese ~4/3,
-// which pushed a normal pick over the v10 cap and forced the item list to be
-// dropped. Raw UTF-8 keeps a normal pick (~185 bytes) inside v10. The browser
-// percent-encodes the fragment on open; the card page splits first, then
-// decodeURIComponent()s each field. '#' fragment is never sent to a server.
-// The card records a pick only: it is not an order, not a payment code, and carries
-// no allergy data.
+// Meal-card link for the receipt QR: CARD_BASE_URL + '#b64.' + base64url(v1 payload).
+// The inner payload is still v1~title~priceFen~store~time~sp~items~note so the card
+// page can split on '~' after decoding. Fields percent-encode '~', ',', '*', '\', '%', space.
+// Legacy fragments that are still raw v1~… are decoded, never generated.
+// '#' is never sent to a server. The card is a pick, not an order, not a payment code,
+// and it carries no allergy data.
 import { utf8, QR_MAX_BYTES } from './qr.mjs';
 
 // GitHub Pages must be enabled for this repository (workflow .github/workflows/github-pages.yml)
@@ -36,13 +30,17 @@ const escField = (s) => String(s ?? '').replace(/%/g, '%25').replace(/~/g, '%7E'
 // A field that fails to decode is used raw (a hand-made link), never dropped.
 const decField = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 
-export function encodeCard(data) {
+function encodeV1(data) {
   const items = data.items === undefined ? '-' : (data.items || []).map((it) => `${escField(it.n)}*${Number.isSafeInteger(it.q) && it.q > 0 ? it.q : 1}`).join(',');
   return ['v1', escField(data.t), data.p ?? 0, escField(data.s), escField(data.at), data.sp === 1 ? '1' : '0', items, escField(data.note ?? '')].join('~');
 }
 
-export function decodeCard(fragment) {
-  const parts = String(fragment ?? '').replace(/^#/, '').split('~');
+export function encodeCard(data) {
+  return `b64.${Buffer.from(encodeV1(data), 'utf8').toString('base64url')}`;
+}
+
+function decodeV1(raw) {
+  const parts = String(raw ?? '').split('~');
   if (parts.length !== 8 || parts[0] !== 'v1') return null;
   const t = decField(parts[1]), s = decField(parts[3]), at = decField(parts[4]), note = decField(parts[7]);
   const p = Number(parts[2]);
@@ -62,6 +60,14 @@ export function decodeCard(fragment) {
     }
   }
   return { t, p, s, at, ...(items === undefined ? {} : { items }), ...(note ? { note } : {}), ...(parts[5] === '1' ? { sp: 1 } : {}) };
+}
+
+export function decodeCard(fragment) {
+  let raw = String(fragment ?? '').replace(/^#/, '');
+  if (raw.startsWith('b64.')) {
+    try { raw = Buffer.from(raw.slice(4), 'base64url').toString('utf8'); } catch { return null; }
+  }
+  return decodeV1(raw);
 }
 
 // { url, data, dropped } where url always fits a version ≤ 10 level-M QR. When it would not,

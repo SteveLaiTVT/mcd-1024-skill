@@ -110,7 +110,7 @@ def run(term, pid, ok):
     term.settle()
     m = term.mark()
     term.send("a")
-    term.expect(["/cart [rm <hash>|clear]", "查看购物车", "购物车 清单"], since=m)
+    term.expect(["/cart [add|rm 序号|clear]", "可选的本地暂存", "购物车 清单"], since=m)
     term.settle()
     frame = term.text(m)
     if "先列可领券" in frame or "/connect" in frame:
@@ -122,7 +122,7 @@ def run(term, pid, ok):
     term.send("\x1b")
     term.settle(0.6)
     frame = term.text(m)
-    if "查看购物车" in frame:
+    if "可选的本地暂存" in frame:
         raise Check("Esc did not dismiss the palette")
     if "/ca" not in frame:
         raise Check("Esc lost the typed text")
@@ -145,7 +145,7 @@ def run(term, pid, ok):
         raise Check("'/cou' still lists /connect")
     ok("'/cou' narrows the palette to /coupons")
 
-    # 7. ↓ + Enter runs the highlighted command: '/w' → wheel, why, weather; ↓ selects /why.
+    # 7. ↓ + Enter runs the highlighted command: '/w' → wheel, why; ↓ selects /why.
     term.type("\x15")  # Ctrl+U clears the input
     term.type("/w")
     term.type("\x1b[B")
@@ -163,69 +163,93 @@ def run(term, pid, ok):
     term.settle()
     ok("'/he' + Enter runs /help, which lists every command")
 
-    # 8. A question ends with ONE clear answer; the agents' back-and-forth is not shown.
+    # 8. A question ends with ONE numbered card. Agent step logs are gone.
     term.type("1人 7分饱 人均30")
     m = term.mark()
     term.send("\r")
-    term.expect(["这一餐就吃", "理由：", "门店：", "/why 看挑选过程"], since=m, timeout=30)
+    term.expect(["编号推荐", "券后 ¥", "理由：", "门店：", "/why 看挑选过程"], since=m, timeout=30)
     term.settle(0.8)
     answer = term.text(m)
-    # Strings that only exist in the per-step details (the spinner may show step names, which is fine).
-    for noise in ["推荐 Agent →", "优化 Agent →", "也可以考虑", "最近吃了啥 / 喝了啥", "按用券后的实际价格从低到高排"]:
+    for noise in ["推荐 Agent", "优化 Agent", "1/6 理解需求", "随手掉落", "这一餐就吃"]:
         if noise in answer:
             raise Check(f"the answer view shows process noise: {noise!r}")
-    ok("a question ends with one answer card (pick · price · store · reason), no step log")
+    ok("a question ends with one numbered card (pick · coupon price · store · reason)")
 
-    # The process is still there, behind /why.
+    # The process is still there, behind /why. It is the card, not a 6-step agent log.
     term.type("/why")
     m = term.mark()
     term.send("\r")
-    term.expect(["挑选过程", "1/6 理解需求", "5/6 查券与官方整单核价", "6/6 饭搭子双 Agent 挑选"], since=m)
+    term.expect(["挑选过程", "人均30"], since=m)
     term.settle()
-    ok("/why shows the full process on request")
+    if "1/6 理解需求" in term.text(m) or "饭搭子" in term.text(m):
+        raise Check("/why still shows the old agent step log")
+    ok("/why shows the recorded pick, not an agent step log")
 
-    # Info questions (issue #2). A fresh demo pick, then answers that must not
-    # reprint the pick card or drop a receipt. '你好' deflection is issue #3.
+    # Info questions read the cache. They must not reprint the pick card or drop a receipt.
     term.type("预算30")
     m = term.mark()
     term.send("\r")
-    term.expect(["这一餐就吃"], since=m, timeout=30)
+    term.expect(["编号推荐"], since=m, timeout=30)
     term.settle(0.8)
     ok("'预算30' picks a meal")
 
     term.type("这个有牛肉吗")
     m = term.mark()
     term.send("\r")
-    term.expect(["牛肉", "按产品名判定"], since=m, timeout=20)
+    term.expect(["牛肉", "按产品名"], since=m, timeout=20)
     term.settle(0.8)
     frame = term.text(m)
-    if "这一餐就吃" in frame:
+    if "编号推荐" in frame:
         raise Check("the beef answer reprinted the pick card")
     if "扫码查看套餐卡片" in frame:
         raise Check("the beef answer dropped a receipt")
-    ok("'这个有牛肉吗' answers beef by product name, with no pick card and no receipt")
+    ok("'这个有牛肉吗' answers from the cache, with no pick card and no receipt")
 
     term.type("这个套餐里有什么")
     m = term.mark()
     term.send("\r")
     term.expect(["麦香鸡", "无糖可口可乐中杯"], since=m, timeout=20)
     term.settle(0.6)
-    ok("'这个套餐里有什么' lists the receipt parts")
+    ok("'这个套餐里有什么' lists the cached parts")
 
     term.type("有什么好吃的")
     m = term.mark()
     term.send("\r")
-    term.expect(["这一餐就吃"], since=m, timeout=30)
+    term.expect(["编号推荐"], since=m, timeout=30)
     term.settle(0.8)
     ok("'有什么好吃的' goes through the meal flow")
 
-    # 9. Buy intent in demo mode is refused; no order.
+    # Issue #8: 「这个看起来不错，吃这个」opens the store gate. It does not pick again.
+    term.type("这个看起来不错，吃这个")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["是这家店吗"], since=m, timeout=20)
+    term.settle(0.6)
+    frame = term.text(m)
+    if "编号推荐" in frame:
+        raise Check("'吃这个' started a new pick instead of the confirm gate")
+    ok("'这个看起来不错，吃这个' reaches the store gate and does not re-pick")
+    term.type("不是")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["已取消，没下单"], since=m, timeout=15)
+    term.settle()
+    ok("answering 不是 cancels without an order")
+
+    if "随手掉落" in term.text():
+        raise Check("a random receipt was printed")
+    ok("no random receipt is printed")
+
+    # Demo buy still asks, then refuses. No create-order.
     term.type("就吃这个了")
     m = term.mark()
     term.send("\r")
+    term.expect(["是这家店吗"], since=m, timeout=15)
+    term.type("是")
+    term.send("\r")
     term.expect(["演示模式不下真实订单", "没有调用 create-order"], since=m, timeout=15)
     term.settle()
-    ok("'就吃这个了' in demo mode shows the coupons + store question and refuses")
+    ok("'就吃这个了' in demo mode asks 是这家店吗 and then refuses")
 
     # 10. /quit exits cleanly.
     term.type("/quit")
@@ -247,47 +271,122 @@ def run(term, pid, ok):
     raise Check("the TUI did not exit after /quit")
 
 
+def child_env(extra=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("MCD_TOKEN", "DEEPSEEK_API_KEY", "NO_COLOR", "CI", "CONTINUOUS_INTEGRATION")}
+    env.update(TERM="xterm-256color", COLUMNS=str(COLS), LINES=str(ROWS))
+    if extra:
+        env.update(extra)
+    return env
+
+
+def spawn(argv, extra_env=None):
+    import fcntl
+    import pty
+    import termios
+    pid, fd = pty.fork()
+    if pid == 0:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
+        os.chdir(ROOT)
+        os.execvpe(NODE, [NODE, *argv], child_env(extra_env))
+    return pid, Term(fd)
+
+
+def finish(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except (ProcessLookupError, ChildProcessError):
+        pass
+
+
+def zero_price(ok, screens):
+    # ¥0 must lose. MCD_TEST_ZERO injects a 0-fen candidate before the gate.
+    pid, term = spawn(["tui/main.mjs", "--demo", "--no-profile", "--fake-llm"], {"MCD_TEST_ZERO": "1"})
+    screens.append(term)
+    try:
+        term.expect(["样本模式"], timeout=30)
+        term.settle()
+        term.type("来一份")
+        m = term.mark()
+        term.send("\r")
+        term.expect(["价格异常（¥0）", "已跳过", "编号推荐"], since=m, timeout=30)
+        term.settle(0.6)
+        frame = term.text(m)
+        if "1. 零元鸡腿" in frame or "1.零元鸡腿" in frame:
+            raise Check("the ¥0 meal won a numbered slot")
+        ok("a ¥0 meal is skipped and never wins")
+    finally:
+        finish(pid)
+
+
+def retry_create(ok, screens):
+    # 「创建」retries the failed attempt. It must not open a new numbered card.
+    pid, term = spawn(
+        ["tui/main.mjs", "--demo", "--no-profile", "--fake-llm"],
+        {"MCD_TEST_ORDER_FAIL": "1"},
+    )
+    screens.append(term)
+    try:
+        term.expect(["样本模式"], timeout=30)
+        term.settle()
+        term.type("来一份")
+        term.send("\r")
+        term.expect(["编号推荐"], timeout=30)
+        term.settle(0.6)
+        term.type("就吃这个了")
+        term.send("\r")
+        term.expect(["是这家店吗"], timeout=20)
+        term.settle(0.4)
+        term.type("是")
+        m = term.mark()
+        term.send("\r")
+        term.expect(["测试拒单", "没下单"], since=m, timeout=20)
+        term.settle(0.4)
+        term.type("创建")
+        m = term.mark()
+        term.send("\r")
+        term.expect(["按上次失败的这一单重试", "是这家店吗"], since=m, timeout=20)
+        term.settle(0.5)
+        frame = term.text(m)
+        if "编号推荐" in frame:
+            raise Check("'创建' started a new pick instead of retrying")
+        ok("'创建' retries the failed order and does not re-pick")
+    finally:
+        finish(pid)
+
+
 def main():
     try:
-        import fcntl
-        import pty
-        import termios
+        import pty  # noqa: F401
     except ImportError as e:
         print(f"SKIP: no POSIX pty support ({e})")
         return 77
     try:
-        pid, fd = pty.fork()
+        pid, term = spawn(["tui/main.mjs", "--demo", "--no-profile", "--fake-llm"])
     except OSError as e:
         print(f"SKIP: cannot open a pty ({e})")
         return 77
-    if pid == 0:
-        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-        # No credentials, and no CI flag: Ink renders non-interactively when it thinks it is in CI.
-        env = {k: v for k, v in os.environ.items() if k not in ("MCD_TOKEN", "DEEPSEEK_API_KEY", "NO_COLOR", "CI", "CONTINUOUS_INTEGRATION")}
-        env.update(TERM="xterm-256color", COLUMNS=str(COLS), LINES=str(ROWS))
-        os.chdir(ROOT)
-        os.execvpe(NODE, [NODE, "tui/main.mjs", "--demo", "--no-profile"], env)
 
-    term, passed = Term(fd), []
+    passed = []
 
     def ok(name):
         passed.append(name)
         print(f"ok - {name}", flush=True)
 
+    screens = [term]
     try:
         run(term, pid, ok)
+        finish(pid)
+        zero_price(ok, screens)
+        retry_create(ok, screens)
     except Check as e:
         print(f"not ok - {e}")
         print("---- screen output (last 3000 chars, ANSI stripped) ----")
-        print(term.text()[-3000:])
+        print(screens[-1].text()[-3000:])
+        finish(pid)
         return 1
-    finally:
-        try:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-        except (ProcessLookupError, ChildProcessError):
-            pass
-    crashed = [w for w in ("TypeError", "ReferenceError", "SyntaxError", "Unhandled") if w in term.text()]
+    blob = "\n".join(s.text() for s in screens)
+    crashed = [w for w in ("TypeError", "ReferenceError", "SyntaxError", "Unhandled") if w in blob]
     if crashed:
         print(f"not ok - error text on screen: {crashed}")
         return 1

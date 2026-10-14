@@ -1,17 +1,18 @@
 // TUI state around the existing web modules. Credentials come from process env
 // only, live in private fields, and are never printed or written anywhere.
 // Allergies are health data: kept here and in the local profile file only (see allergy.mjs).
-import { MCPClient, MCPError } from '../web/mcp-client.mjs';
-import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape, detailOf } from '../web/meal-engine.mjs';
-import { fallbackPicks, liveMenuPlans, snapshotMenu, matchMenu, quoteMenuItems } from './menu.mjs';
-import { describeDetail, demoDetail, resolveInfoItem } from './info.mjs';
-import { readHistory, demoHistory, shiftDay } from '../web/order-history.mjs';
-import { storeResults } from '../web/store-search.mjs';
-import { DeepSeekClient, DeepSeekError } from '../web/deepseek-client.mjs';
-import { calendarContext, WeatherClient } from '../web/agent-context.mjs';
-import { defaultPreferences, learnFeedback } from '../web/agent-memory.mjs';
-import { DEFAULT_INTENT } from './intent.mjs';
-import { couponPicture, claimableList, buildProfile, runAssistantAgents } from './assistant.mjs';
+import { MCPClient, MCPError } from '../core/mcp.mjs';
+import { inspectBenefits, prepareWheel, prepareDemo, WheelSession, publicOffers, dateValue, quoteBest, menuIndex, menuShape, detailOf } from '../core/pricing.mjs';
+import { fallbackPicks, liveMenuPlans, snapshotMenu } from './menu.mjs';
+import { readHistory, demoHistory, shiftDay } from '../core/history.mjs';
+import { storeResults } from '../core/store.mjs';
+import { DeepSeekClient, DeepSeekError } from '../core/llm.mjs';
+import { calendarContext } from '../core/context.mjs';
+import { defaultPreferences, learnFeedback } from '../core/pick.mjs';
+import { couponPicture, claimableList, valueCoupons } from '../core/coupons.mjs';
+import { applyGate } from '../core/eligibility.mjs';
+import { reRank, profileSummary, emptyTaste, pushTurn, rememberFeedback, stripAllergyText } from '../core/memory.mjs';
+import { meatsInName, prefetchCandidateDetails } from '../core/menu.mjs';
 import { receiptFrom } from './receipt.mjs';
 import { alaCarteMains, demoAlaCarte, liveAlaCarte, mergeAlaCarte, applyUpgrades } from './pricing.mjs';
 import { applyAllergyFilter, normalizeAllergens, loadProfile, saveProfile } from './allergy.mjs';
@@ -23,13 +24,13 @@ import { buyContext, validBuyContext, baseItems, chooseTakeWay, createOrderArgs,
 
 export class TuiError extends Error {}
 
-const errText = (e) => e instanceof MCPError || e instanceof TuiError ? e.message : (e?.message || '未返回');
+const DEFAULT_BUDGET_YUAN = 25;
 
 export class TuiSession {
   #mcdToken; #deepseekKey; #mcp = null; #deepseek = null; #allergies = [];
   // profilePath: local JSON for allergy memory; null keeps it in memory only (tests, or no home directory).
   constructor({ dataset, env = process.env, demo = false, mcpFactory = (t) => new MCPClient(t), deepseekFactory = (k) => new DeepSeekClient(k),
-    weatherClient = new WeatherClient(), now = () => new Date(), wheel = new WheelSession(), random = Math.random, profilePath = null, ordersPath = null }) {
+    llm = null, now = () => new Date(), wheel = new WheelSession(), random = Math.random, profilePath = null, ordersPath = null }) {
     this.profilePath = profilePath; this.profileError = '';
     if (profilePath) {
       const loaded = loadProfile(profilePath);
@@ -46,14 +47,17 @@ export class TuiSession {
     }
     this.#mcdToken = String(env.MCD_TOKEN || '').trim();
     this.#deepseekKey = String(env.DEEPSEEK_API_KEY || '').trim();
-    this.dataset = dataset; this.demo = demo; this.mcpFactory = mcpFactory; this.weatherClient = weatherClient; this.now = now; this.wheel = wheel; this.random = random;
-    this.store = null; this.history = null; this.benefits = null; this.weather = { status: 'unavailable' }; this.lastPick = null;
+    this.dataset = dataset; this.demo = demo; this.mcpFactory = mcpFactory; this.now = now; this.wheel = wheel; this.random = random; this.llm = llm;
+    this.store = null; this.history = null; this.benefits = null; this.lastPick = null;
+    this.recentTurns = []; this.taste = emptyTaste(); this.detailCache = {}; this.couponTable = []; this.menuSnapshot = [];
+    this.lastOrderAttempt = null; this.dataIncomplete = false; this.ranked = []; this.profileLine = '';
     this.lastReceipt = null; // Survives invalidate(): it is a record of a past pick, timestamped.
     this.lastDetails = null; // { query, lines }: the last pick's full process, shown only by /why. Local only.
-    this.request = { people: 1, budgetPerPersonFen: Math.round(DEFAULT_INTENT.budgetPerPersonYuan * 100), avoidMainCodes: [] };
+    this.request = { people: 1, budgetPerPersonFen: Math.round(DEFAULT_BUDGET_YUAN * 100), avoidMainCodes: [] };
     this.profile = {}; // Only values set explicitly with /set; instructions without numbers fall back to these, then DEFAULT_INTENT.
     // Cheapest effective price (after coupons) wins unless the user asks for another goal.
-    this.preferences = { ...defaultPreferences(), mode: 'team', goal: 'cheapest' };
+    this.preferences = { ...defaultPreferences(), goal: 'cheapest' };
+    this.#refreshProfileLine();
     this.deepseekNote = '';
     if (this.#deepseekKey) {
       try { this.#deepseek = deepseekFactory(this.#deepseekKey); }
@@ -99,7 +103,13 @@ export class TuiSession {
     if (!city || !keyword) throw new TuiError('用法：/store 城市 位置关键词，例如 /store 深圳 华强北');
     return storeResults((await this.requireClient().call('query-nearby-stores', { beType: 1, searchType: 2, city, keyword })).data);
   }
-  selectStore(store, city) { this.store = { ...store, city }; this.benefits = null; this.menu = null; this.weather = { status: 'unavailable' }; this.invalidate(); }
+  selectStore(store, city) { this.store = { ...store, city }; this.benefits = null; this.menu = null; this.detailCache = {}; this.menuSnapshot = []; this.couponTable = []; this.invalidate(); }
+  #refreshProfileLine() { this.profileLine = profileSummary({ taste: this.taste, hasAllergy: this.#allergies.length > 0 }); }
+  noteTurn(text) {
+    const clean = stripAllergyText(text, this.#allergies);
+    this.recentTurns = pushTurn(this.recentTurns, { text: clean, summary: clean });
+  }
+  get llmClient() { return this.llm || this.#deepseek; }
 
   setRequest(change) { this.request = { ...this.request, ...change }; this.invalidate(); }
   setProfile(change) {
@@ -119,13 +129,13 @@ export class TuiSession {
   addAllergies(tokens) {
     const wanted = normalizeAllergens(tokens), added = wanted.filter((a) => !this.#allergies.includes(a));
     if (!added.length) return { added, existing: wanted, saved: Boolean(this.profilePath) && !this.profileError };
-    this.#allergies = [...this.#allergies, ...added]; this.invalidate();
+    this.#allergies = [...this.#allergies, ...added]; this.#refreshProfileLine(); this.invalidate();
     return { added, existing: wanted.filter((a) => !added.includes(a)), saved: this.#saveProfile() };
   }
   removeAllergies(tokens) {
     const names = normalizeAllergens(tokens), removed = this.#allergies.filter((a) => names.includes(a) || tokens.includes(a));
     if (!removed.length) return { removed, saved: false };
-    this.#allergies = this.#allergies.filter((a) => !removed.includes(a)); this.invalidate();
+    this.#allergies = this.#allergies.filter((a) => !removed.includes(a)); this.#refreshProfileLine(); this.invalidate();
     return { removed, saved: this.#saveProfile() };
   }
   #saveProfile() {
@@ -152,8 +162,8 @@ export class TuiSession {
   // Takes one order out of the cart: it goes back to unpushed and stays in the history.
   cartRemove(ref) {
     const hit = findCommit(this.orders, ref);
-    if (!hit) throw new TuiError(`没有找到提交 ${ref || ''}；用 /cart 或 /graph 查看 hash。`);
-    if (!hit.pushedAt) throw new TuiError(`${hit.hash} 不在购物车里（还没 /push）。`);
+    if (!hit) throw new TuiError(`没有找到这一单 ${ref || ''}。用 /cart 查看。`);
+    if (!hit.pushedAt) throw new TuiError(`${hit.hash} 不在购物车里。`);
     this.#setOrders(this.orders.commits.map((c) => c === hit ? (({ pushedAt, ...rest }) => rest)(c) : c));
     return { removed: hit, saved: this.#saveOrders() };
   }
@@ -214,6 +224,7 @@ export class TuiSession {
       if (!this.benefits) this.benefits = await inspectBenefits(client, common, onProgress);
       quote = await quoteBest(client, common, baseItems(ctx.items), this.benefits.usable);
     } catch (e) { throw new TuiError(`重新核价没有完成（${e instanceof MCPError || e instanceof TuiError ? e.message : '官方核价失败'}），没下单。`); }
+    if (!(quote.priceFen > 0)) throw new TuiError(`「${preview.receipt.title}」价格异常（¥0），没下单。`);
     if (quote.priceFen > preview.receipt.priceFen) throw new TuiError(`重新核价是 ${money(quote.priceFen)}，比刚才的 ${money(preview.receipt.priceFen)} 贵，没下单；请重新选一餐。`);
     const takeWay = chooseTakeWay(quote.takeWays, { title: preview.takeWayTitle, code: preview.takeWay?.code });
     if (!takeWay) throw new TuiError('官方核价没有返回取餐方式（takeWayList），没下单。');
@@ -247,7 +258,7 @@ export class TuiSession {
     return { orderId, known, ...status };
   }
 
-  async quote(onProgress = () => {}) {
+  async quote(onProgress = () => {}, { signal, wantMeats } = {}) {
     const context = this.requireStore(), request = { ...this.request, avoidMainCodes: [...this.request.avoidMainCodes], wantMainCodes: [...(this.request.wantMainCodes || [])] };
     this.invalidate();
     if (!this.demo) this.benefits = null;
@@ -255,27 +266,82 @@ export class TuiSession {
     const capture = (p) => { if (p?.benefits) this.benefits = p.benefits; onProgress(p); };
     const report = this.demo
       ? prepareDemo({ plans: this.dataset.plans, offers: this.dataset.offers, campaigns: this.dataset.campaigns }, { ...context, storeName: this.store.storeName }, request)
-      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames });
+      : await prepareWheel(this.requireClient(), this.dataset.templates, context, request, capture, { names: this.packageNames, signal });
     if (report.menu?.ok) this.menu = { storeCode: context.storeCode, items: report.menu.items, shape: report.menu.shape };
     const setsQuoted = report.quotedPlans.length;
+    // An abort (the 10s budget is shorter than 40-50 MCP calls) can land in ANY phase, not
+    // just prepareWheel: catch it per-stage and keep the quotes we already have as a partial
+    // report, instead of letting it kill the whole flow. Only rethrow when nothing was quoted.
+    const aborted = () => signal?.aborted;
+    const notePartial = (note) => {
+      report.partial = true;
+      report.partialNote = [report.partialNote, note].filter(Boolean).join('；');
+    };
+    const runStage = async (stageNote, fn) => {
+      try { return await fn(); }
+      catch (e) {
+        if (!aborted()) throw e;
+        if (!report.quotedPlans.length) throw e; // nothing to show: let the abort surface
+        notePartial(stageNote);
+        return null;
+      }
+    };
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
     const mains = alaCarteMains(this.mainNames, request, new Set(this.dataset.templates.mainProductCodes));
-    const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
-      : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress) : {};
+    let singles = {};
+    if (this.demo) {
+      singles = { plans: demoAlaCarte(this.dataset.menu, mains, request) };
+    } else if (!report.partial && mains.length && setsQuoted < 5) {
+      // liveAlaCarte is nice-to-have: skip its 8+ calls when prepareWheel already quoted enough.
+      // (report.partial also skips: the signal is dead, the extra phases would throw on it.)
+      singles = await runStage('单点主食核价未完成', () =>
+        liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress, { signal })) || {};
+    }
     mergeAlaCarte(report, singles);
     // No template priced at this store (not a budget problem): price what the store's own menu offers instead.
-    if (!this.demo && !setsQuoted && !report.candidates.length && report.menu?.ok) {
+    if (!this.demo && !report.partial && !setsQuoted && !report.candidates.length && report.menu?.ok) {
       const picks = fallbackPicks(report.menu.items, request);
       if (picks.length) {
-        const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress);
-        mergeAlaCarte(report, extra);
-        report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
-        report.menuFallback = { tried: picks.length, quoted: extra.plans.length };
+        const extra = await runStage('门店菜单补位核价未完成', () =>
+          liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress, { signal }));
+        if (extra) {
+          mergeAlaCarte(report, extra);
+          report.excludedPlans = [...report.excludedPlans, ...extra.excluded];
+          report.menuFallback = { tried: picks.length, quoted: extra.plans.length };
+        }
       }
     }
     applyAllergyFilter(report, this.#allergies);
     applyUpgrades(report, this.mainNames);
+    if (process.env.MCD_TEST_ZERO === '1') {
+      report.candidates.push({ id: 'zero-injected', title: '零元鸡腿', priceFen: 0, parts: [{ name: '鸡腿', quantity: 1 }], savingFen: 0, couponNames: [], sample: true });
+    }
+    const gated = applyGate(report.candidates);
+    report.eligibilitySkipped = gated.skipped;
+    report.candidates = reRank(gated.kept, { taste: this.taste, meatOf: meatsInName, wantMeats });
     report.counts = { ...report.counts, quotedPlans: report.quotedPlans.length, wheelCandidates: report.candidates.length };
+    this.menuSnapshot = (this.menu?.items || report.menu?.items || []).slice(0, 40).map((m) => ({ code: m.code || m.productCode, name: m.name, priceFen: m.priceFen ?? null }));
+    for (const p of report.candidates.slice(0, 8)) {
+      if (!this.detailCache[p.id]) this.detailCache[p.id] = { code: p.id, name: p.title, parts: (p.parts || []).map((x) => ({ name: x.name, qty: x.quantity })), removable: [], meatKind: meatsInName(`${p.title} ${(p.parts || []).map((x) => x.name).join(' ')}`), complete: false, unknown: false };
+    }
+    // Ingredient prefetch targets the ranked candidates' own product codes, not the
+    // menu at large: the old menu-wide prefetch answered "有什么料" with unrelated meals.
+    // Best-effort enrichment: an abort here is swallowed as "details stay unprefetched"
+    // and never touches the report's partial state (the quotes themselves are done).
+    if (!this.demo && this.#mcp) {
+      try { Object.assign(this.detailCache, await prefetchCandidateDetails(this.#mcp, context, report.candidates, { signal })); }
+      catch { this.dataIncomplete = true; }
+    }
+    // Same best-effort rule for the coupon value table: never throws, never flips partial.
+    try {
+      if (this.demo) {
+        const top = report.candidates[0];
+        this.couponTable = top ? [{ name: top.couponNames?.[0] || '样本券', applicable: (top.savingFen || 0) > 0, saveYuan: (top.savingFen || 0) / 100, ratio: null, afterYuan: (top.priceFen || 0) / 100, note: top.couponNames?.length ? '' : '估算' }] : [];
+      } else if (this.#mcp && this.benefits?.usable?.length) {
+        const priced = report.candidates.slice(0, 3).map((p) => ({ ...p, items: p.orderItems || p.items || [] })).filter((p) => p.items.length);
+        this.couponTable = await valueCoupons(this.#mcp, context, this.benefits.usable, priced, { signal });
+      }
+    } catch { this.dataIncomplete = true; }
     if (report.candidates.length && ['empty', 'unavailable'].includes(report.status)) report.status = 'ready';
     if (report.status === 'ready' && !report.candidates.length) report.status = 'empty';
     this.wheel.accept(report); return report;
@@ -291,64 +357,24 @@ export class TuiSession {
     this.menu = { storeCode: context.storeCode, items, shape: menuShape(raw) };
     return items;
   }
-  // '牛肉堡多少钱': menu matches, and live calculate-price on the cheapest few (quantity 1). Never orders, never claims.
-  async priceLookup(item, onProgress = () => {}) {
-    const context = this.requireStore(), items = await this.storeMenu(onProgress), matches = matchMenu(items, item);
-    if (this.demo) return { item, items, matches, quoted: [], failed: [], sample: true };
-    onProgress({ text: `calculate-price（核价 ${Math.min(matches.length, 3)} 样，只读）…` });
-    const { quoted, failed } = matches.length ? await quoteMenuItems(this.requireClient(), context, matches, this.benefits?.usable || []) : { quoted: [], failed: [] };
-    return { item, items, matches, quoted, failed, sample: false };
-  }
-  // Read-only meal detail for an info question. Unlike menuItemCart, a query-meal-detail
-  // failure stays an error so the answer can say the interface failed rather than "this is a single".
-  // The name is the longest exact suffix on this store's menu, then matchMenu.
-  async itemDetail(item, onProgress = () => {}) {
-    const context = this.requireStore(), items = await this.storeMenu(onProgress);
-    const exact = resolveInfoItem(items, item), matches = exact ? [exact] : matchMenu(items, item);
-    const base = { item, items, matches, sample: this.demo };
-    if (!matches.length) return { ...base, detail: null, error: null };
-    if (this.demo) {
-      const raw = demoDetail(this.dataset.packages, matches[0].code, matches[0].name);
-      return { ...base, detail: raw ? describeDetail(raw) : null, error: null };
-    }
-    try {
-      onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
-      const data = (await this.requireClient().call('query-meal-detail', { ...context, code: matches[0].code })).data;
-      const raw = detailOf(data, matches[0].code);
-      if (!raw) return { ...base, detail: null, error: '餐品详情为空' };
-      return { ...base, detail: describeDetail(raw), error: null };
-    } catch (e) {
-      return { ...base, detail: null, error: errText(e) };
-    }
-  }
-  // Read-only details for the picked meal. Uses lastReceipt.buy (store code + product codes),
-  // so a later store switch does not change which meal is described. Demo, or a pick with no
-  // buy context, returns no details — the receipt's part names still answer on their own.
-  // productCode is the priced package (selected choices live in roundList); 〔默认〕 is the catalog isDefault and can differ from receipt.parts.
-  async pickDetail(onProgress = () => {}) {
-    const receipt = this.lastReceipt, buy = receipt?.buy, sourceStore = buy?.storeCode || '';
-    if (this.demo || !buy) return { receipt, details: [], error: null, sourceStore };
-    const client = this.requireClient(), details = [];
-    let error = null;
-    for (const it of buy.items || []) {
-      const code = it?.productCode;
-      if (!code) continue;
-      try {
-        onProgress({ text: 'query-meal-detail（餐品详情，只读）…' });
-        const data = (await client.call('query-meal-detail', { storeCode: sourceStore, orderType: 1, beType: 1, code })).data;
-        const raw = detailOf(data, code);
-        if (raw) details.push(describeDetail(raw));
-        else error = error || '餐品详情为空';
-      } catch (e) {
-        error = error || errText(e);
-      }
-    }
-    return { receipt, details, error, sourceStore };
-  }
-
   couponPicture() {
     const claimable = this.demo ? claimableList(this.dataset.offers?.offers, this.dataset.campaigns?.events) : claimableList(this.benefits?.offers, this.benefits?.entries);
     return { ...couponPicture(this.demo ? null : this.benefits, this.wheel.report), claimable };
+  }
+
+  async runTool(name, args, { signal } = {}) {
+    if (this.demo) { this.dataIncomplete = true; return { error: '样本模式没有实时接口' }; }
+    const body = await this.requireClient().call(name, args, { signal });
+    if (name === 'query-meals') {
+      const items = [...menuIndex(body.data).values()];
+      this.menu = { storeCode: args.storeCode, items, shape: menuShape(body.data) };
+      this.menuSnapshot = items.slice(0, 40);
+    }
+    if (name === 'query-meal-detail') {
+      const raw = detailOf(body.data, args.code);
+      if (raw) this.detailCache[args.code] = { code: args.code, name: raw.name || args.code, parts: (raw.rounds || []).flatMap((r) => (r.choices || []).filter((c) => c.quantity > 0 || c.isDefault).map((c) => ({ name: c.name, qty: c.quantity || 1 }))), removable: [], meatKind: meatsInName(raw.name), complete: Array.isArray(raw.ingredients) && raw.ingredients.length > 0, unknown: false };
+    }
+    return { data: body.data ?? body };
   }
 
   // Activities with their participation route. Read-only: campaign-calendar and available-coupons.
@@ -367,8 +393,6 @@ export class TuiSession {
     const heldNames = (this.benefits?.rows || []).filter((r) => r.kind === 'owned-coupon').map((r) => r.name);
     return { sample: false, offersComplete, rows: classifyActivities(activitiesFromCalendar(calendar, now), { offers, heldNames, now }) };
   }
-  // Minimal life-assistant profile for DeepSeek (this.profile holds only /set values).
-  userProfile() { return buildProfile({ history: this.history, preferences: this.preferences, request: this.request, now: this.now(), date: calendarContext(this.now()).date }); }
   recordPick(plan) {
     this.lastPick = plan;
     // Live picks also keep their create-order inputs for the buy flow ('就吃这个了').
@@ -390,19 +414,13 @@ export class TuiSession {
 
   spin() { this.requireFresh(); const result = this.wheel.choose(); this.recordPick(result.plan); return result; }
 
-  async buddy({ mood = 'normal', local = false, signal, onStage } = {}) {
-    const report = this.requireFresh(), coupons = this.couponPicture().usable;
-    const result = await runAssistantAgents({ report, settings: structuredClone(this.preferences), context: { calendar: calendarContext(this.now()), weather: { ...this.weather } },
-      mood, client: local ? null : this.#deepseek, signal, onStage, fresh: () => this.wheel.report === report && this.wheel.fresh(),
-      profile: this.userProfile(), coupons, mainNames: this.mainNames });
-    const byId = new Map(report.candidates.map((p) => [p.id, p]));
-    this.recordPick(byId.get(result.choices[0].id));
-    return { ...result, coupons, plans: result.choices.map((c) => ({ ...byId.get(c.id), signals: c.signals, thought: c.thought, thoughtSource: c.thoughtSource })) };
-  }
-
   feedback(vote) {
-    if (!this.lastPick) throw new TuiError('先让饭搭子或转盘挑出一份，再给反馈。');
+    if (!this.lastPick) throw new TuiError('先选出一份，再给反馈。');
     this.preferences = learnFeedback(this.preferences, this.lastPick, vote, this.dataset.templates.mainProductCodes, calendarContext(this.now()).date);
+    this.taste = rememberFeedback(this.taste, this.lastPick, vote);
+    const meats = meatsInName(this.lastPick.title);
+    if (vote === 'like' && meats.length) this.taste = { ...this.taste, meats: [...new Set([...(this.taste.meats || []), ...meats])] };
+    this.#refreshProfileLine();
     return this.lastPick;
   }
 
@@ -427,12 +445,5 @@ export class TuiSession {
     return { successCount: ok, failedCount: failed };
   }
 
-  async readWeather() {
-    if (!this.store?.city) throw new TuiError('先选择门店，天气只按门店所在城市查询。');
-    const [location] = await this.weatherClient.search(this.store.city);
-    if (!location) throw new TuiError('没有找到这个城市的天气位置。');
-    this.weather = await this.weatherClient.current(location); return this.weather;
-  }
-
-  close() { this.#mcp?.close(); this.#mcp = null; this.#deepseek?.close(); }
+  close() { this.#mcp?.close(); this.#mcp = null; this.#deepseek?.close(); this.llm?.close?.(); }
 }

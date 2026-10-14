@@ -10,9 +10,9 @@ import { createShell } from './shell.mjs';
 
 export { createUI };
 
-export async function runTui({ dataset, input = process.stdin, output = process.stdout, env = process.env, demo = false, color, session: provided, autoConnect = true, random, profilePath = null, ordersPath = null }) {
+export async function runTui({ dataset, input = process.stdin, output = process.stdout, env = process.env, demo = false, color, session: provided, autoConnect = true, random, profilePath = null, ordersPath = null, llm = null }) {
   const palette = createPalette(color ?? (Boolean(output.isTTY) && !env.NO_COLOR));
-  const session = provided || new TuiSession({ dataset, env, demo, profilePath, ordersPath, ...(random ? { random } : {}) });
+  const session = provided || new TuiSession({ dataset, env, demo, profilePath, ordersPath, llm, ...(random ? { random } : {}) });
   if (input.isTTY && output.isTTY) {
     // Loaded only on a TTY, so piped runs never pull in React.
     const { runInk } = await import('./ink-app.mjs');

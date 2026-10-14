@@ -1,7 +1,7 @@
 // À la carte mains next to set meals, ranked by effective price after coupons.
 // Live prices come from the official calculate-price quote (same coupon comparison
 // as set meals); demo prices from the menu snapshot. Nothing here invents a discount.
-import { quoteBest } from '../web/meal-engine.mjs';
+import { quoteBest, menuItemCart } from '../core/pricing.mjs';
 import { money } from './ansi.mjs';
 
 // Wanting a specific main: a set meal with it wins if it costs at most this much more per person.
@@ -35,12 +35,17 @@ export function demoAlaCarte(menu, mains, request) {
 }
 
 // Live: one official whole-cart quote per main, with the same held-coupon comparison as set meals.
-export async function liveAlaCarte(client, context, mains, request, coupons, onProgress = () => {}) {
+export async function liveAlaCarte(client, context, mains, request, coupons, onProgress = () => {}, { signal } = {}) {
   const common = { storeCode: context.storeCode, orderType: context.orderType, beType: context.beType }, plans = [], failed = [];
   for (const [i, m] of mains.entries()) {
     onProgress({ step: 4, text: `正在核价单点主食（${i + 1} / ${mains.length}）…` });
-    try { plans.push(alaCartePlan(m, request, await quoteBest(client, common, [{ productCode: m.code, quantity: 1 }], coupons), '官方单点核价')); }
-    catch { failed.push({ id: `alacarte-${m.code}`, title: `单点 · ${m.name}`, reason: '单点核价未完成，本次不比价' }); }
+    try {
+      const cart = await menuItemCart(client, common, m.code, 1, m.name, { signal });
+      plans.push(alaCartePlan(m, request, await quoteBest(client, common, cart.items, coupons, 64, { signal }), '官方单点核价'));
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      failed.push({ id: `alacarte-${m.code}`, title: `单点 · ${m.name}`, cause: 'cart', reason: '这家店现在做不出来', cartError: true });
+    }
   }
   return { plans, failed };
 }

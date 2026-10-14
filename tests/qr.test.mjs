@@ -173,9 +173,12 @@ test('a ~180-byte meal-card URL round-trips through a version 7–10 QR with the
   const card = cardUrl({ title: '酥脆无双套餐', priceFen: 2050, storeName: '麦当劳深圳怡景餐厅', at: '2026-10-14T01:41:00.000Z',
     parts: [{ name: '麦麦脆汁鸡-琵琶腿', quantity: 1 }, { name: '迷你薯条', quantity: 1 }, { name: '无糖可口可乐中杯', quantity: 1 }] }, { note: '少冰' });
   const url = card.url, bytes = utf8(url).length;
-  assert.deepEqual(card.dropped, [], 'nothing trimmed — items fit'); assert.equal(bytes, 186, 'base (53) + # + 132 delimited UTF-8 bytes (one %20 for the time-space)');
+  assert.match(url, /#b64\.[A-Za-z0-9_-]+$/);
+  assert(bytes <= 212, `card url is ${bytes} bytes`);
+  const back = decodeCard(url.split('#')[1]);
+  assert.equal(back.t, '酥脆无双套餐'); assert.equal(back.p, 2050);
   const qr = encodeQR(url);
-  assert(qr.version >= 7 && qr.version <= 10, `version ${qr.version}`);
+  assert(qr.version >= 1 && qr.version <= 10, `version ${qr.version}`);
   assertStructure(qr, url);
   const d = decode({ modules: sampleRender(renderQR(qr, { square: true }), qr.size, { square: true }) });
   assert.equal(d.eci, 26); assert.equal(d.payload, url);

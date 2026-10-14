@@ -10,11 +10,11 @@ import { PassThrough } from 'node:stream';
 import { TuiSession } from '../tui/session.mjs';
 import { runTui } from '../tui/app.mjs';
 import { stripAnsi, createPalette } from '../tui/ansi.mjs';
-import { MCPError } from '../web/mcp-client.mjs';
+import { MCPError } from '../core/mcp.mjs';
 import { encodeQR, renderQR, qrWidth, QR_MAX_BYTES } from '../tui/qr.mjs';
 import { cartOf, loadOrders } from '../tui/orders.mjs';
 import { COMMAND_HELP, HELP_COMMANDS, helpLines } from '../tui/render.mjs';
-import { parseBuyIntent } from '../tui/intent.mjs';
+import { createFakeLlm } from './fake-llm.mjs';
 import { createOrderArgs, renderPayment, isPaymentReply, isStoreConfirm, orderStatus, couponLine, claimFailures, baseItems, chooseTakeWay,
   BUY_NO_PICK, BUY_DEMO, BUY_NO_CONTEXT, BUY_CANCELLED, PICKUP_ONLY, PAY_HINT, PAY_FOLLOWUP, PAY_QR_LABEL, QR_TOO_LONG, NO_PENDING, NO_PLACED } from '../tui/buy.mjs';
 
@@ -81,7 +81,7 @@ const names = (mcp) => mcp.calls.map((c) => c.name);
 
 // A live (mocked) pick priced with the held coupon (¥22). `inCart`: it was also /commit + /push'ed.
 async function livePick({ ordersPath = null, mcp = fakeMcp(), inCart = false } = {}) {
-  const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, now: () => new Date(now), ordersPath });
+  const session = new TuiSession({ dataset, env, mcpFactory: mcp.factory, now: () => new Date(now), ordersPath, llm: createFakeLlm() });
   await session.connect();
   session.selectStore({ storeCode: 'S1', storeName: '测试餐厅' }, '深圳');
   const report = await session.quote();
@@ -119,7 +119,7 @@ test('就吃这个了 → coupons listed → 是这家店吗 → 是: claims fir
 
   for (const s of ['这单能用的券：立减券（已用在报价里）、新领立减券（待领取），领完再下单', '是这家店吗？测试餐厅（是/不是）', '取餐方式：堂食',
     '最终合计 ¥20.00（比刚才 ¥22.00 少 ¥2.00）', '用券：新领立减券', '订单号：ORDER-123', `支付链接：${LINK}`, PAY_HINT, PAY_FOLLOWUP,
-    '状态：配餐中（已支付）', '取餐码：A123', `已移出购物车：${commit.hash}`]) assert(text.includes(s), s);
+    '状态：配餐中（已支付）', '取餐码：A123', `已移出购物车：${commit.title}`]) assert(text.includes(s), s);
 
   // Coupons are claimed before the order, and exactly one order is created.
   const flow = names(mcp).slice(before);
@@ -186,7 +186,7 @@ test('a coupon that fails to claim aborts before create-order and names the coup
   const mcp = fakeMcp({ state: { claimable: true }, claim: async () => ({ data: { successCount: 0, failedCount: 1, failedCoupons: [{ couponId: NEW.id, couponName: NEW.title, reason: '已领完' }] } }) });
   const { session, commit } = await livePick({ mcp, inCart: true });
   const text = await drive(session, ['就吃这个了', '是', '/quit']);
-  assert(text.includes('这些券没领到：新领立减券。没下单。') && text.includes('购物车没有变化'));
+  assert(text.includes('这些券没领到：新领立减券。没下单。') && !text.includes('购物车没有变化'));
   assert.deepEqual(writes(mcp).map((c) => c.name), ['auto-bind-coupons']);
   assert.deepEqual(cartOf(session.orders).map((c) => c.hash), [commit.hash]);
   assert.equal(session.orders.placed.length, 0);
@@ -217,7 +217,7 @@ test('create-order failure: the error is shown plainly and the cart is unchanged
   const mcp = fakeMcp({ createOrder: async () => { throw new MCPError('麦当劳未创建订单：门店已打烊'); } });
   const { session, commit } = await livePick({ mcp, inCart: true });
   const text = await drive(session, ['就吃这个了', '是', '/cart', '/quit']);
-  assert(text.includes('麦当劳未创建订单：门店已打烊') && text.includes('购物车没有变化'));
+  assert(text.includes('麦当劳未创建订单：门店已打烊') && text.includes('没下单') && !text.includes('购物车没有变化'));
   assert.equal(writes(mcp).length, 1);
   assert.deepEqual(cartOf(session.orders).map((c) => c.hash), [commit.hash]);
   assert.equal(session.orders.placed.length, 0); assert(!session.orders.commits[0].orderId);
@@ -235,15 +235,16 @@ test('a pick without create-order inputs is refused instead of guessed; no pick 
   session.recordPick({ ...plan, orderItems: undefined });
   const before = mcp.calls.length;
   const text = await drive(session, ['就吃这个了', '就吃这个了，外送', '/quit']);
-  assert(text.includes(BUY_NO_CONTEXT) && text.includes(PICKUP_ONLY));
+  assert(text.includes(BUY_NO_CONTEXT));
+  assert.equal(writes(mcp).length, 0, 'no claim, no order');
   assert.equal(mcp.calls.length, before, 'no coupon check, no pricing, no order');
 
-  const fresh = new TuiSession({ dataset, env, mcpFactory: fakeMcp().factory, now: () => new Date(now) });
+  const fresh = new TuiSession({ dataset, env, mcpFactory: fakeMcp().factory, now: () => new Date(now), llm: createFakeLlm() });
   assert((await drive(fresh, ['就吃这个了', '/quit'])).includes(BUY_NO_PICK));
 });
 
 test('piped demo: a pick, 就吃这个了 shows coupons + store question then refuses; /order, 支付完成, /help; /checkout no longer exists', async () => {
-  const text = await pipe(['就吃这个了', '1人 7分饱 人均30', '就吃这个了', '/order', '支付完成', '/checkout', '/help', '/quit'], { demo: true, random: () => 0.99 });
+  const text = await pipe(['就吃这个了', '1人 7分饱 人均30', '就吃这个了', '是', '/order', '支付完成', '/checkout', '/help', '/quit'], { demo: true, random: () => 0.99, llm: createFakeLlm() });
   for (const s of [BUY_NO_PICK, '就吃这个 · 到店自取（演示）', '这单能用的券：', '是这家店吗？', BUY_DEMO, '没有调用 create-order', NO_PLACED, NO_PENDING,
     '/order [订单号]', '说 就吃这个了 直接下单', '未知命令 /checkout', '再见']) assert(text.includes(s), s);
   for (const s of ['支付链接：', PAY_QR_LABEL, '订单号：', '已创建麦当劳订单']) assert(!text.includes(s), s);
@@ -267,14 +268,7 @@ test('a payment link too long for a v10-M QR is shown whole as text, with no QR'
   assert.equal(session.orders.placed[0].payUrl, long);
 });
 
-test('buy helpers: intent phrases, store answers, coupon line, claim failures, create-order args, payment rendering and replies', () => {
-  for (const s of ['就吃这个了', '就这个', '要这个', '就要这个', '买这个', '下单', '就它了', '定这个', '就吃这个', '那就吃这个吧', '就这个了！', '我要这个', '帮我下单', '就吃这个了，下单'])
-    assert.deepEqual(parseBuyIntent(s), { delivery: false, takeWay: null }, s);
-  for (const s of ['这个好吃', '这个好吃吗', '不要这个', '1人 7分饱', '有什么活动', '吃什么好', '我要外卖', '']) assert.equal(parseBuyIntent(s), null, s);
-  assert.deepEqual(parseBuyIntent('就吃这个了，打包'), { delivery: false, takeWay: '外带' });
-  assert.deepEqual(parseBuyIntent('就这个 堂食'), { delivery: false, takeWay: '堂食' });
-  assert.deepEqual(parseBuyIntent('就吃这个了，外送'), { delivery: true, takeWay: null });
-
+test('buy helpers: store answers, coupon line, claim failures, create-order args, payment rendering and replies', () => {
   for (const s of ['是', '对', '就是这家', 'yes', 'YES', '是的']) assert(isStoreConfirm(s), s);
   for (const s of ['不是', '换一家', 'no', '', null, '是吗', '是不是']) assert(!isStoreConfirm(s), String(s));
 

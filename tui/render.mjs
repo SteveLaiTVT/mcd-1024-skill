@@ -1,19 +1,17 @@
 // Pure renderers: data in, terminal lines out. No I/O here.
-import { historyCalendar } from '../web/order-history.mjs';
-import { storeStatus } from '../web/store-search.mjs';
-import { SIGNAL_LABELS, PERSONAS } from '../web/agent-prompts.mjs';
+import { historyCalendar } from '../core/history.mjs';
+import { storeStatus } from '../core/store.mjs';
 import { money, padEnd, textWidth } from './ansi.mjs';
-import { DEFAULT_INTENT, DEFAULT_STORE_SEARCH } from './intent.mjs';
+import { DEFAULT_INTENT, DEFAULT_STORE_SEARCH } from './defaults.mjs';
+import { factReason } from '../core/pick.mjs';
 import { SCREEN_NOTE, keywordsFor, isKnownAllergen } from './allergy.mjs';
 import { upgradeText } from './pricing.mjs';
 import { NO_REGISTER_NOTE } from './activity.mjs';
 
 export const NOTICE = '参赛者独立开发，非麦当劳官方产品；餐品、价格与供应以麦当劳官方结果为准。';
-const MOOD_LABELS = { normal: '日常', comfort: '有点累，想被照顾', surprise: '想要惊喜', gathering: '一起吃，热闹一点' };
-const GOAL_LABELS = { balanced: '均衡', cheapest: '省钱', variety: '换口味' };
 const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const partsText = (plan) => (plan.parts || []).map((p) => `${p.name}×${p.quantity}`).join('、');
-const LABELS = { ...SIGNAL_LABELS, coupon: '用上手里的券' };
+const LABELS = { value: '这一池更省一点', coupon: '用上手里的券', balanced: '预算内合适' };
 const signalText = (signals) => signals.map((s) => LABELS[s] || s).join(' · ');
 const left = (hours) => hours < 24 ? `还剩约 ${hours} 小时` : `还剩约 ${Math.floor(hours / 24)} 天`;
 const couponNote = (name, coupons = []) => {
@@ -56,16 +54,14 @@ export function statusLine(session, P) {
   const mcp = s.demo ? P.yellow('样本模式') : s.connected ? P.green('MCP 已连接') : s.hasMcdToken ? P.yellow('MCP 未连接') : P.red('缺 MCD_TOKEN');
   const quote = !s.report ? '未核价' : s.report.sourceKind === 'demo-snapshot' ? '历史样本价' : s.fresh() ? `报价剩 ${clock(remaining)}` : P.red('报价已失效');
   const avoid = r.avoidMainCodes.length ? ` · 避开 ${r.avoidMainCodes.length} 种主食` : '';
-  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · 预算${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${s.hasDeepSeek ? 'DeepSeek 就绪' : '本地偏好推荐'}`)}`;
+  const model = s.llmClient ? (s.hasDeepSeek ? 'DeepSeek 就绪' : '模型就绪') : '本地模式';
+  return `${mcp}${P.gray(` · ${s.store ? s.store.storeName : `未选门店（默认搜 ${DEFAULT_STORE_SEARCH.keyword}）`} · 预算${money(r.budgetPerPersonFen)}${avoid} · ${quote} · ${model}`)}`;
 }
 
-// The single line of "why" an answer carries: the assistant's one-liner, else the reason signals.
+// One factual line. No season, no time of day, no persona.
 export function pickReason(plan) {
   if (plan.thought) return plan.thought;
-  const signals = plan.signals || [], usesCoupon = plan.couponNames?.length > 0;
-  const reasons = usesCoupon && !signals.includes('coupon') ? ['coupon', ...signals] : signals;
-  if (reasons.length) return `${signalText(reasons)}${usesCoupon && plan.savingFen > 0 ? `（省了 ${money(plan.savingFen)}）` : ''}`;
-  return plan.upgrade ? upgradeText(plan.upgrade) : '预算内用券后最便宜的一份';
+  return factReason(plan, { rank: 1, cheaper: plan.savingFen > 0 ? 1 : 0 }) || (plan.upgrade ? upgradeText(plan.upgrade) : '预算内用券后最便宜的一份');
 }
 
 // The one answer a question ends with: the pick, its price, the store and one line of reason.
@@ -197,35 +193,6 @@ export function renderPick(plan, P, { report, remaining = null, signals = [], so
   return lines;
 }
 
-export function renderAgentResult(result, P, { report, remaining }) {
-  const [first, ...rest] = result.plans;
-  const via = result.source === 'deepseek'
-    ? `DeepSeek V4.1 Flash · ${result.rounds} 轮（${result.stages.map((s) => s.role === 'recommend' ? '推荐 Agent' : '优化 Agent').join(' → ')}）${result.stages.length === 2 && result.stages[0].primaryId !== result.stages[1].primaryId ? ' · 优化 Agent 调整了首选' : ''}`
-    : '本地偏好推荐（未调用 DeepSeek）';
-  const coupons = result.coupons || [];
-  const lines = renderPick(first, P, { report, remaining, signals: first.signals, coupons, thought: first.thought, thoughtSource: first.thoughtSource, source: `${PERSONAS[result.vibe]?.name || ''} · ${via}` });
-  if (rest.length) {
-    lines.push('', P.bold('也可以考虑：'));
-    for (const p of rest) {
-      const reasons = p.couponNames?.length && !p.signals.includes('coupon') ? ['coupon', ...p.signals] : p.signals;
-      lines.push(`· ${p.title}  ${money(p.priceFen)}  ${P.gray(signalText(reasons))}${p.couponNames?.length ? P.cyan(` 用券：${p.couponNames.map((n) => couponNote(n, coupons)).join('、')}${p.savingFen > 0 ? `，省了 ${money(p.savingFen)}` : ''}`) : ''}`);
-      if (p.thought) lines.push(`  ${P.gray(`助理想法：${p.thought}`)}`);
-    }
-  }
-  return lines;
-}
-
-export function renderIntent(intent, mainNames, P, { store = '' } = {}) {
-  const avoid = intent.avoidMainCodes.map((c) => mainNames.get(c) || c), want = (intent.wantMainCodes || []).map((c) => mainNames.get(c) || c);
-  const d = (key) => intent.defaulted?.includes(key) ? P.gray('（默认）') : '';
-  return [
-    `预算 ${money(intent.budgetPerPersonFen)}${d('budgetPerPersonYuan')}`,
-    ...(want.length ? [`想吃：${want.join('、')}（单点和含它的套餐一起比价）`] : []),
-    `避开：${[intent.avoidRecentDays ? `${intent.avoidRecentDays === 1 ? '昨天' : '前两天'}吃过的主食（读历史订单）` : '', avoid.join('、')].filter(Boolean).join('；') || '无'}`,
-    `门店：${store || (intent.city ? `${intent.city} · ${intent.keyword}` : '沿用当前门店')} · 目标：${GOAL_LABELS[intent.goal] || '沿用设置'} · 心情：${MOOD_LABELS[intent.mood] || intent.mood} · 揭晓：${intent.finish === 'wheel' ? '转盘' : '饭搭子双 Agent'}`,
-  ];
-}
-
 const GLYPHS = ['·', '░', '▒', '▓', '█'];
 export function renderHeatmap(history, P, { mode = 'recent', year = Number(history.anchorDay.slice(0, 4)) } = {}) {
   const cal = historyCalendar(history, { year, mode }), cw = mode === 'recent' ? 2 : 1;
@@ -290,26 +257,20 @@ export const COMMAND_HELP = [
   [['use'], '/use 序号', '选择 /store 列出的门店（也可以直接输入序号）', ['选择', '序号', '门店']],
   [['coupons'], '/coupons', '先列可领券（名称 · 可省 · 有效期），再列持有券；只查看，不领取', ['券', '优惠', '券包', '可领']],
   [['claim'], '/claim', '领取全部可领券（先列出可领券，需输入 yes 明确确认）', ['领券', '领取', '券']],
-  [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与；也可以说“有什么活动”', ['活动', '日历', '报名']],
+  [['activity'], '/activity', '活动日历：规则、日期、能否通过 MCP 参与', ['活动', '日历', '报名']],
   [['set'], '/set 预算', '例：/set 35', ['预算']],
   [['avoid'], '/avoid [主食名…|clear]', '查看或切换要避开的主食', ['避开', '不吃', '主食']],
   [['allergy'], '/allergy [过敏原…]', '不带参数列出，带参数添加（如 /allergy 花生 虾）；也可以说“我对花生过敏”', ['过敏', '忌口']],
   [['allergy-clear'], '/allergy-clear 过敏原', '删除一项过敏记录', ['过敏', '删除']],
   [['price'], '/price', '官方整单核价：单点主食和套餐按用券后价格一起比（5 分钟内有效）', ['核价', '价格', '报价']],
   [['wheel'], '/wheel', '转盘随机揭晓一份（同轮不重复）', ['转盘', '随机']],
-  [['buddy'], '/buddy [心情] [local]', 'DeepSeek 推荐 + 优化双 Agent；心情 normal/comfort/surprise/gathering', ['推荐', '饭搭子', '挑选']],
-  [['why'], '/why', '上一次挑选的详细过程：需求、门店、历史、核价、两个 Agent 的讨论与备选', ['过程', '详情', '理由', '备选']],
-  [['prefs'], '/prefs goal|persona|mode 值', '目标 cheapest（默认）/balanced/variety；风格 cozy/frugal/playful', ['偏好', '目标', '风格']],
+  [['why'], '/why', '上一次挑选记下来的过程', ['过程', '详情', '理由', '备选']],
   [['like'], '/like', '喜欢上一份（仅本次会话内存）', ['喜欢', '反馈']],
   [['less'], '/less', '以后少推荐上一份（仅本次会话内存）', ['少推荐', '反馈']],
   [['receipt'], '/receipt', '打印最近一份的小票；扫二维码打开套餐卡片（静态页，不是付款码）', ['小票', '二维码', '卡片']],
-  [['commit'], '/commit -m "备注"', '把当前这一餐记成本地提交（7 位 hash），不下单', ['记下', '提交', '备注']],
-  [['push'], '/push', '把未 push 的提交全部加入购物车（本地清单，还不是订单）', ['购物车', '加入']],
-  [['cart'], '/cart [rm <hash>|clear]', '查看购物车；rm 移出一单，clear 清空（需输入 yes）', ['购物车', '清单']],
+  [['cart'], '/cart [add|rm 序号|clear]', '可选的本地暂存，不下单', ['购物车', '清单']],
   [['order'], '/order [订单号]', '列出真实订单（订单号 · 餐 · 金额 · 状态 · 时间）；带订单号查实时状态（也可以回复“支付完成”）', ['订单', '支付', '状态']],
-  [['graph'], '/graph', '像 git log --graph 一样看提交历史和 origin/main', ['历史', '提交']],
-  [['radar'], '/radar [recent|year] [年] · /radar apply', '本餐雷达图 + 历史订单热力图 + 最近吃了啥；apply 把前两天的主食加入避开', ['雷达', '热力图', '历史']],
-  [['weather'], '/weather', '查询门店所在城市天气，供饭搭子参考', ['天气']],
+  [['radar'], '/radar [recent|year] [年] · /radar apply', '历史订单热力图 + 最近吃了啥；apply 把前两天的主食加入避开', ['雷达', '热力图', '历史']],
   [['help', 'h', '?'], '/help · /h · /?', '显示这份命令表', ['帮助', '命令']],
   [['status'], '/status', '当前连接、门店、餐量和报价状态', ['状态', '连接']],
   [['clear'], '/clear', '清屏', ['清屏']],
@@ -320,13 +281,12 @@ export const HELP_COMMANDS = new Set(COMMAND_HELP.flatMap(([names]) => names));
 export function helpLines(P) {
   const c = (cmd, text) => `${P.cyan(padEnd(cmd, 26))}${text}`;
   return [
-    P.bold('直接输入一句话 → Agent 在后台走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选，最后只给一个答案'),
-    P.gray('  例：预算30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动；这个有牛肉吗 / 随心配里有什么'),
-    P.gray('  一次问一件事，同时问价和别的只回答价格。'),
+    P.bold('直接说一句话。有 DeepSeek key 时由模型理解并给出编号 1、2、3；没有 key 时按券后价本地编号，并标明本地模式。'),
+    P.gray('  例：预算30；我想吃麦香鱼；我对花生过敏；这个有牛肉吗；盲盒'),
     P.gray(`  没写的默认：预算 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
-    P.gray('  /why 查看上一次的完整过程（每一步的结果、两个 Agent 的选择与备选）'),
+    P.gray('  /why 查看上一次挑选记下来的过程'),
     P.gray('  输入 / 立即弹出命令面板（按前缀过滤，带说明和关键词）：↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭'),
-    `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 就这个 / 要这个 / 下单；到店自取，不支持外送）')}`,
+    `${P.bold('选好一餐后，说 就吃这个了 直接下单')}${P.gray('（也可以说 1、2、3；到店自取）')}`,
     P.gray('  先列出这单能用、要领的券，再问“是这家店吗？”；回 是 才领券、重新核价（只会持平或更便宜）并在麦当劳创建订单，'),
     P.gray('  然后给支付链接和支付二维码，扫码或在麦当劳 App 付款；回 不是 就取消。付完说 支付完成 查订单状态。'),
     '',

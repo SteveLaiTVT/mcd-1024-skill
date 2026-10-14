@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { storeResults, storeStatus, addressLocations, addressCity } from '../web/store-search.mjs';
+import { storeResults, storeStatus, addressLocations, addressCity } from '../core/store.mjs';
 
 test('store status follows only official booleans, preserves all reservation slots and never guesses hours', () => {
   const stores = storeResults([

@@ -1,9 +1,9 @@
 // The store's actual menu (query-meals): a fallback when no template prices at this store, direct
 // price questions ('牛肉堡多少钱'), and the real reason an answer came back empty. Prices shown as
 // quotes come from calculate-price; menu prices are labelled 菜单价 and never treated as a quote.
-import { quoteBest, menuItemCart } from '../web/meal-engine.mjs';
+import { quoteBest, menuItemCart } from '../core/pricing.mjs';
 import { money } from './ansi.mjs';
-import { MEAT_KINDS } from './intent.mjs';
+import { MEAT_KINDS } from '../core/menu.mjs';
 import { isDrink } from './render.mjs';
 
 export const MENU_FALLBACK_LIMIT = 6;
@@ -36,16 +36,19 @@ export function menuPlan(item, cart, request, quote, mainCodes = new Set()) {
 }
 
 // Live: one official whole-cart quote per picked menu item (same coupon comparison as set meals).
-export async function liveMenuPlans(client, context, picks, request, coupons, mainCodes, onProgress = () => {}) {
+export async function liveMenuPlans(client, context, picks, request, coupons, mainCodes, onProgress = () => {}, { signal } = {}) {
   const common = { storeCode: context.storeCode, orderType: context.orderType, beType: context.beType }, avoid = new Set(request.avoidMainCodes || []);
   const plans = [], failed = [], excluded = [];
   for (const [i, m] of picks.entries()) {
     onProgress({ step: 4, text: `模板套餐这家店不可用，按门店实际菜单核价（${i + 1} / ${picks.length}）…` });
     try {
-      const cart = await menuItemCart(client, common, m.code, 1, m.name);
+      const cart = await menuItemCart(client, common, m.code, 1, m.name, { signal });
       if (cart.parts.some((p) => avoid.has(p.code))) { excluded.push({ id: `menu-${m.code}`, title: m.name, reason: '避开最近吃过的主食' }); continue; }
-      plans.push(menuPlan(m, cart, request, await quoteBest(client, common, cart.items, coupons), mainCodes));
-    } catch (e) { failed.push({ id: `menu-${m.code}`, title: m.name, cause: 'api', reason: `门店菜单核价失败：${e?.message || '未返回'}` }); }
+      plans.push(menuPlan(m, cart, request, await quoteBest(client, common, cart.items, coupons, 64, { signal }), mainCodes));
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      failed.push({ id: `menu-${m.code}`, title: m.name, cause: 'api', reason: `门店菜单核价失败：${e?.message || '未返回'}` });
+    }
   }
   return { plans, failed, excluded };
 }

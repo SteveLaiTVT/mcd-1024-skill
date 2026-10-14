@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MCPClient, MCPError, decodeResponse, businessResponse, ENDPOINT } from '../web/mcp-client.mjs';
+import { MCPClient, MCPError, decodeResponse, businessResponse, ENDPOINT } from '../core/mcp.mjs';
 const fakeToken = 'test-only-token';
 const reply = (payload, result, status = 200, session = null) => ({ ok: status >= 200 && status < 300, status, headers: { get: () => session }, text: async () => payload.id == null ? '' : JSON.stringify({ jsonrpc: '2.0', id: payload.id, result }) });
 
@@ -21,7 +21,7 @@ test('initialization negotiates protocol, then sends only to the official origin
     return reply(payload, payload.method === 'initialize' ? { protocolVersion: '2025-03-26' } : { structuredContent: { success: true, data: {} } }, 200, 'session-test');
   } });
   await client.initialize(); await client.call('now-time-info');
-  assert.equal(calls.length, 3); calls.forEach(({ url, options }) => { assert.equal(url, ENDPOINT); assert.equal(options.headers.Authorization, `Bearer ${fakeToken}`); assert.equal(options.credentials, 'omit'); assert.equal(options.redirect, 'error'); assert.equal(options.referrerPolicy, 'no-referrer'); });
+  assert.equal(calls.length, 3); calls.forEach(({ url, options }) => { assert.equal(url, ENDPOINT); assert.equal(options.headers.Authorization, `Bearer ${fakeToken}`); assert.equal(options.redirect, 'error'); assert.equal(options.credentials, undefined); assert.equal(options.referrerPolicy, undefined); });
   assert.equal(calls[2].options.headers['MCP-Protocol-Version'], '2025-03-26'); assert.equal(calls[2].options.headers['Mcp-Session-Id'], 'session-test');
   assert(!JSON.stringify(client).includes(fakeToken)); client.close();
   await assert.rejects(() => client.call('now-time-info'), /连接已关闭/); assert.equal(calls.length, 3);
@@ -31,11 +31,10 @@ test('read-only API rejects claim, orders, payments and unknown tools', async ()
   for (const tool of ['auto-bind-coupons', 'create-order', 'pay-order', 'unknown']) await assert.rejects(() => client.call(tool), /不支持/);
   assert.equal(calls, 0); client.close();
 });
-test('browser fetch keeps its global receiver through initialization and tool calls', async () => {
+test('fetch is called as a plain function with no browser-only options', async () => {
   let requests = 0;
-  const client = new MCPClient(fakeToken, { sleep: async () => {}, fetchFn: function (url, options) {
-    if (this !== globalThis) throw new TypeError('Illegal invocation');
-    assert.equal(url, ENDPOINT); requests++;
+  const client = new MCPClient(fakeToken, { sleep: async () => {}, fetchFn: (url, options) => {
+    assert.equal(url, ENDPOINT); assert.equal(options.credentials, undefined); requests++;
     const payload = JSON.parse(options.body);
     return Promise.resolve(reply(payload, payload.method === 'initialize'
       ? { protocolVersion: '2025-03-26' }

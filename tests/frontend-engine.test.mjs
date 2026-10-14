@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { budgetFen, buildCart, couponVariants, eligibleCoupons, couponTimeStatus, constrainCoupons, publicCalendar, prepareWheel, quoteBest, wallet, WheelSession } from '../web/meal-engine.mjs';
+import { budgetFen, buildCart, couponVariants, eligibleCoupons, couponTimeStatus, constrainCoupons, publicCalendar, prepareWheel, quoteBest, wallet, WheelSession } from '../core/pricing.mjs';
 
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
 const templates = await json('plan-recipes'), packages = await json('packages'), snapshots = await json('meal-plans');
