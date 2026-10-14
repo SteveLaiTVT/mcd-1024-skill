@@ -33,6 +33,9 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '22'
+          
+      - name: 安装依赖
+        run: npm ci     
 
       - name: 运行 JavaScript 测试
         run: npm test
