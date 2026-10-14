@@ -251,13 +251,22 @@ export async function quoteBest(client, common, items, coupons, limit = 64, { si
   const { variants, truncated } = couponVariants(items, coupons, limit);
   const baseline = await client.call('calculate-price', { ...common, items: variants[0] }, { signal });
   requireValue(amount(baseline.data?.price), '官方基础报价无效');
-  let best = baseline, bestCart = variants[0], successes = 0, failures = 0;
-  for (const cart of variants.slice(1)) {
+  // Coupon variants quote in parallel (concurrency 3): a serial loop costs ~1s per variant
+  // against the live API and blows the 10s recommendation budget. 429/502/503/504 retries
+  // stay inside the MCP client; an external abort still throws via stopIfAborted.
+  const results = await mapLimited(variants.slice(1), async (cart) => {
     try {
       const quoted = await client.call('calculate-price', { ...common, items: cart }, { signal });
-      requireValue(amount(quoted.data?.price), '官方用券报价无效'); successes++;
-      if (quoted.data.price < best.data.price) { best = quoted; bestCart = cart; }
-    } catch (e) { stopIfAborted(signal, e); failures++; }
+      requireValue(amount(quoted.data?.price), '官方用券报价无效');
+      return { ok: true, quoted, cart };
+    } catch (e) { stopIfAborted(signal, e); return { ok: false }; }
+  }, 3);
+  // Collect every result first, then take the minimum; the winning cart comes along.
+  let best = baseline, bestCart = variants[0], successes = 0, failures = 0;
+  for (const r of results) {
+    if (!r.ok) { failures++; continue; }
+    successes++;
+    if (r.quoted.data.price < best.data.price) { best = r.quoted; bestCart = r.cart; }
   }
   const names = new Map(coupons.map((c) => [c.couponId, c.name]));
   requireValue(Number.isFinite(dateValue(best.datetime)), '官方报价缺少时间');
@@ -374,33 +383,43 @@ export async function prepareWheel(client, templates, context, request, onProgre
       ready.push({ recipe, cart });
     } catch (e) { failed.push({ id: recipe.id, title: recipe.title, ...templateFailure(recipe, codeStatus, names, e) }); }
   }
-  let done = 0;
+  // An external abort (the 10s recommendation budget) must not discard the quotes that
+  // already finished: collect them as we go and return a partial report instead of throwing.
+  const finished = [];
+  let done = 0, partial = false;
   onProgress({ step: 3, text: `正在比较整单价格（0 / ${ready.length}）…`, benefits });
-  const results = await mapLimited(ready, async ({ recipe, cart }) => {
-    try {
-      const quote = await quoteBest(client, common, cart.items, benefits.usable, 64, { signal });
-      // The report must not carry account-private coupon identifiers (couponId/couponCode):
-      // orderItems are for create-order, and the buy flow re-prices (quoteBest directly)
-      // to get fresh ones with coupons before ordering. Strip them here; the plan keeps
-      // productCode / quantity / modification / roundList, which is all buyContext needs.
-      const orderItems = (quote.orderItems || []).map(({ couponId, couponCode, ...rest }) => ({ ...rest }));
-      return { ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote, orderItems,
-        packages: cart.packages, parts: cart.parts, mainCodes: cart.mainCodes, withinBudget: quote.priceFen <= request.people * request.budgetPerPersonFen };
-    } catch (e) { stopIfAborted(signal, e); return { id: recipe.id, title: recipe.title, cause: 'api', reason: `整单核价（calculate-price）失败：${e?.message || '未返回'}` }; }
-    finally { done++; onProgress({ step: 3, text: `正在比较整单价格（${done} / ${ready.length}）…`, benefits }); }
-  });
-  const quoted = results.filter((r) => 'priceFen' in r).sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
-  failed.push(...results.filter((r) => !('priceFen' in r)));
-  const complete = benefits.walletComplete && benefits.calendarComplete && !failed.length && quoted.every((p) => p.comparisonComplete);
+  try {
+    await mapLimited(ready, async ({ recipe, cart }) => {
+      try {
+        const quote = await quoteBest(client, common, cart.items, benefits.usable, 64, { signal });
+        // The report must not carry account-private coupon identifiers (couponId/couponCode):
+        // orderItems are for create-order, and the buy flow re-prices (quoteBest directly)
+        // to get fresh ones with coupons before ordering. Strip them here; the plan keeps
+        // productCode / quantity / modification / roundList, which is all buyContext needs.
+        const orderItems = (quote.orderItems || []).map(({ couponId, couponCode, ...rest }) => ({ ...rest }));
+        finished.push({ ...pick(recipe, ['id', 'people', 'portion', 'title', 'wheelTitle', 'wheelKind']), ...quote, orderItems,
+          packages: cart.packages, parts: cart.parts, mainCodes: cart.mainCodes, withinBudget: quote.priceFen <= request.people * request.budgetPerPersonFen });
+      } catch (e) { stopIfAborted(signal, e); finished.push({ id: recipe.id, title: recipe.title, cause: 'api', reason: `整单核价（calculate-price）失败：${e?.message || '未返回'}` }); }
+      finally { done++; onProgress({ step: 3, text: `正在比较整单价格（${done} / ${ready.length}）…`, benefits }); }
+    }, 2);
+  } catch (e) {
+    if (!signal?.aborted) throw e;
+    partial = true;
+  }
+  const quoted = finished.filter((r) => 'priceFen' in r).sort((a, b) => a.priceFen - b.priceFen || a.id.localeCompare(b.id));
+  failed.push(...finished.filter((r) => !('priceFen' in r)));
+  const complete = !partial && benefits.walletComplete && benefits.calendarComplete && !failed.length && quoted.every((p) => p.comparisonComplete);
   quoted.forEach((p) => { p.priceLabel = complete ? '候选范围内最低核价' : '最低已核验价'; });
   const expiry = Math.min(benefits.now + 300000, ...quoted.map((p) => dateValue(p.quotedAt) + 300000), ...benefits.usable.map((c) => c.expiresAt), ...benefits.cutoffs);
-  const completed = dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
-  const validForSeconds = Math.max(0, Math.floor((expiry - completed) / 1000));
+  // Partial: the signal is dead, so another now-time-info would throw '已取消' — reuse the benefits timestamp.
+  const completedAt = partial ? benefits.now : dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
+  const validForSeconds = Math.max(0, Math.floor((expiry - completedAt) / 1000));
   const candidates = quoted.filter((p) => p.withinBudget);
   return { schemaVersion: 1, sourceKind: 'official-live-pre-wheel-pricing', context: { ...context }, request: { ...request, totalBudgetFen: request.people * request.budgetPerPersonFen },
     status: !validForSeconds ? 'expired' : candidates.length ? 'ready' : quoted.length || excluded.length ? 'empty' : 'unavailable',
     checkedAt: new Date(benefits.now).toISOString(), expiresAt: new Date(expiry).toISOString(), validForSeconds,
     priceComparisonComplete: complete, minimumVerifiedPriceFen: quoted[0]?.priceFen ?? null,
+    partial, partialNote: partial ? `${ready.length - finished.length} 个候选未核完` : '',
     benefits: benefits.rows, claimableOffers: benefits.offers, campaignEntries: benefits.entries,
     counts: { ownedAssets: benefits.ownedCount, validatedCoupons: benefits.usable.length, claimableDisplayOffers: benefits.offers.length, campaignEntries: benefits.entries.length, quotedPlans: quoted.length, wheelCandidates: candidates.length },
     quotedPlans: quoted, candidates, failedPlans: failed, excludedPlans: excluded,

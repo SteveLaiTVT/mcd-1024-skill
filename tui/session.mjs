@@ -272,10 +272,11 @@ export class TuiSession {
     // À la carte mains join the pool; allergy screening runs locally before anything is ranked or shown to an agent.
     const mains = alaCarteMains(this.mainNames, request, new Set(this.dataset.templates.mainProductCodes));
     const singles = this.demo ? { plans: demoAlaCarte(this.dataset.menu, mains, request) }
+      : report.partial ? {} // Aborted mid-quote: the extra menu phases would throw on the dead signal; keep what we have.
       : mains.length ? await liveAlaCarte(this.requireClient(), context, mains, request, this.benefits?.usable || [], onProgress, { signal }) : {};
     mergeAlaCarte(report, singles);
     // No template priced at this store (not a budget problem): price what the store's own menu offers instead.
-    if (!this.demo && !setsQuoted && !report.candidates.length && report.menu?.ok) {
+    if (!this.demo && !report.partial && !setsQuoted && !report.candidates.length && report.menu?.ok) {
       const picks = fallbackPicks(report.menu.items, request);
       if (picks.length) {
         const extra = await liveMenuPlans(this.requireClient(), context, picks, request, this.benefits?.usable || [], new Set(this.dataset.templates.mainProductCodes), onProgress, { signal });

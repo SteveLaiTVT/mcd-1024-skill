@@ -421,3 +421,74 @@ test('register_allergy points to /allergy', async () => {
   await exec.runIntent(intent('register_allergy'), { query: '我花生过敏' });
   assert.match(out.text(), /\/allergy/);
 });
+
+// Abort mid-quote: prepareWheel returns the finished quotes as a partial report,
+// it does not throw the whole recommendation away.
+test('prepareWheel: abort during candidate quoting returns a partial report', async () => {
+  const { prepareWheel } = await import('../core/pricing.mjs');
+  const context = { storeCode: 'S', orderType: 1, beType: 1 };
+  const request = { people: 1, budgetPerPersonFen: 3000, avoidMainCodes: [] };
+  const controller = new AbortController();
+  const recipes = ['r1', 'r2', 'r3'].map((id) => ({ id, people: 1, title: `套餐${id}`, ingredients: [{ productCode: 'P1', quantity: 1 }] }));
+  let priceCalls = 0;
+  const client = {
+    async call(name, args, opts) {
+      if (opts?.signal?.aborted) throw new Error('已取消。');
+      switch (name) {
+        case 'now-time-info': return { data: { datetime: '2026-10-14 12:00:00' } };
+        case 'available-coupons': return { data: [] };
+        case 'query-my-coupons': return { data: { currentPage: 1, coupons: [], totalCount: 0, totalPages: 1 } };
+        case 'query-store-coupons': return { data: [] };
+        case 'campaign-calendar': return { data: { dailyList: [] } };
+        case 'query-meals': return { data: { meals: [] } };
+        case 'query-meal-detail':
+          return { data: { code: 'P1', name: '套餐一', rounds: [{ id: '1', quantity: 1, choices: [{ code: 'C1', name: '主食', quantity: 1, isDefault: true }] }] } };
+        case 'calculate-price': {
+          priceCalls++;
+          const n = priceCalls;
+          await new Promise((r) => setTimeout(r, 30));
+          if (opts?.signal?.aborted) throw new Error('已取消。');
+          if (n === 1) {
+            // First quote finishes; the abort lands right after so the rest die mid-loop.
+            queueMicrotask(() => controller.abort());
+            return { data: { price: 1500 }, datetime: '2026-10-14 12:00:00' };
+          }
+          throw new Error('已取消。');
+        }
+        default: throw new Error(`unexpected call ${name}`);
+      }
+    },
+  };
+  const report = await prepareWheel(client, { recipes, mainProductCodes: ['C1'] }, context, request, () => {}, { signal: controller.signal });
+  assert.equal(report.partial, true);
+  assert.match(report.partialNote, /2 个候选未核完/);
+  assert.equal(report.quotedPlans.length, 1, 'keeps the finished quote');
+  assert.equal(report.candidates.length, 1, 'the finished quote still becomes a candidate');
+});
+
+// quoteBest quotes coupon variants in parallel and takes the minimum cart along.
+test('quoteBest quotes coupon variants in parallel and takes the minimum', async () => {
+  const { quoteBest } = await import('../core/pricing.mjs');
+  const items = [{ productCode: 'P1', quantity: 1 }];
+  const mkCoupon = (id) => ({ couponId: id, couponCode: `CODE-${id}`, name: `券${id}`, productCodes: new Set(['P1']), expiresAt: Date.now() + 86400000 });
+  let inflight = 0, maxInflight = 0;
+  const client = {
+    async call(name, args) {
+      assert.equal(name, 'calculate-price');
+      const tagged = (args.items || []).find((i) => i.couponId);
+      inflight++; maxInflight = Math.max(maxInflight, inflight);
+      await new Promise((r) => setTimeout(r, 15));
+      inflight--;
+      const price = !tagged ? 2000 : tagged.couponId === 'c1' ? 1800 : 1500;
+      return { data: { price }, datetime: '2026-10-14 12:00:00' };
+    },
+  };
+  const q = await quoteBest(client, { storeCode: 'S', orderType: 1, beType: 1 }, items, [mkCoupon('c1'), mkCoupon('c2')], 64, {});
+  assert.equal(maxInflight, 2, 'variant quotes run in parallel, not serially');
+  assert.equal(q.basePriceFen, 2000);
+  assert.equal(q.priceFen, 1500);
+  assert.equal(q.savingFen, 500);
+  assert.deepEqual(q.couponNames, ['券c2']);
+  assert.equal(q.orderItems.find((i) => i.couponId)?.couponId, 'c2');
+  assert.equal(q.successfulCouponQuotes, 2);
+});

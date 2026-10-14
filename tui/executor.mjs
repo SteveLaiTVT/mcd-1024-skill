@@ -30,7 +30,7 @@ const snapshotReceipt = (receipt) => {
 export function createExecutor({ session, ui, ask, message }) {
   const P = ui.palette;
 
-  function showNumbered(plans, { local = false, localNote = '', blindbox = false, skips = [], query = '' } = {}) {
+  function showNumbered(plans, { local = false, localNote = '', blindbox = false, skips = [], query = '', partialNote = '' } = {}) {
     if (!plans.length) {
       ui.panel('没有能点的餐', [skips.map((s) => s.line).filter(Boolean).join('\n') || allOut(skips.length), P.gray('换家店或调预算试试。')], 'yellow');
       session.lastDetails = { query, lines: skips.map((s) => s.line) };
@@ -48,6 +48,7 @@ export function createExecutor({ session, ui, ask, message }) {
       if (reason) lines.push(`理由：${reason}`);
       lines.push(P.gray(`  ${(plan.parts || []).map((p) => p.name).join('、')}`));
     });
+    if (partialNote) lines.push(P.yellow(`部分候选未及核价（${partialNote}），先按已核完的候选推荐。`));
     for (const s of skips) if (s.line) lines.push(P.gray(s.line));
     if (session.couponTable?.length) {
       lines.push(P.bold('券折算'));
@@ -87,7 +88,8 @@ export function createExecutor({ session, ui, ask, message }) {
         session.lastDetails = { query, lines: [emptyLine, ...skipped.map((s) => s.line)] };
         return;
       }
-      showNumbered(ranked, { local, localNote, skips: [...(report?.eligibilitySkipped || []), ...skipped], query });
+      showNumbered(ranked, { local, localNote, skips: [...(report?.eligibilitySkipped || []), ...skipped], query,
+        partialNote: report?.partial ? (report.partialNote || '部分候选未核完') : '' });
     } catch (e) { step.fail(message(e)); }
   }
 
