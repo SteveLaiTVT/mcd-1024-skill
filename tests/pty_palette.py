@@ -184,6 +184,41 @@ def run(term, pid, ok):
     term.settle()
     ok("/why shows the full process on request")
 
+    # Info questions (issue #2). A fresh demo pick, then answers that must not
+    # reprint the pick card or drop a receipt. '你好' deflection is issue #3.
+    term.type("预算30")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["这一餐就吃"], since=m, timeout=30)
+    term.settle(0.8)
+    ok("'预算30' picks a meal")
+
+    term.type("这个有牛肉吗")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["牛肉", "按产品名判定"], since=m, timeout=20)
+    term.settle(0.8)
+    frame = term.text(m)
+    if "这一餐就吃" in frame:
+        raise Check("the beef answer reprinted the pick card")
+    if "扫码查看套餐卡片" in frame:
+        raise Check("the beef answer dropped a receipt")
+    ok("'这个有牛肉吗' answers beef by product name, with no pick card and no receipt")
+
+    term.type("这个套餐里有什么")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["麦香鸡", "无糖可口可乐中杯"], since=m, timeout=20)
+    term.settle(0.6)
+    ok("'这个套餐里有什么' lists the receipt parts")
+
+    term.type("有什么好吃的")
+    m = term.mark()
+    term.send("\r")
+    term.expect(["这一餐就吃"], since=m, timeout=30)
+    term.settle(0.8)
+    ok("'有什么好吃的' goes through the meal flow")
+
     # 9. Buy intent in demo mode is refused; no order.
     term.type("就吃这个了")
     m = term.mark()

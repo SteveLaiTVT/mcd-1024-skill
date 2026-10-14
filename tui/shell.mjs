@@ -7,10 +7,10 @@ import { DeepSeekError } from '../web/deepseek-client.mjs';
 import { budgetFen } from '../web/meal-engine.mjs';
 import { padEnd, money } from './ansi.mjs';
 import { TuiError } from './session.mjs';
-import { runAgentFlow, runPriceFlow } from './agent-flow.mjs';
+import { runAgentFlow, runPriceFlow, runInfoFlow } from './agent-flow.mjs';
 import { NOTICE, statusLine, renderStores, renderBenefits, renderReport, renderAgentResult, renderAnswer, renderHeatmap, helpLines, renderClaimable, renderAllergies,
   renderActivities, HELP_COMMANDS } from './render.mjs';
-import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery, parseBuyIntent, parsePriceQuery } from './intent.mjs';
+import { GOALS, MOODS, DEFAULT_INTENT, DEFAULT_STORE_SEARCH, isActivityQuery, parseBuyIntent, parsePriceQuery, parseInfoQuery } from './intent.mjs';
 import { parseAllergyStatement } from './allergy.mjs';
 import { printReceipt, maybeReceipt } from './receipt.mjs';
 import { parseCommitNote, renderGraph, renderCart, commitLine, headOf, cartOf, unpushed, CART_USAGE } from './orders.mjs';
@@ -344,8 +344,15 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
     }
     if (isActivityQuery(rest)) return commands.activity();
     // '牛肉堡多少钱': a direct price lookup in the store's menu, not the pick flow.
+    // A mixed question ('多少钱，有牛肉吗') stays a price question.
     const priceQuery = parsePriceQuery(rest, session.mainNames);
     if (priceQuery) return runPriceFlow(session, rest, priceQuery, ui);
+    // '这个有牛肉吗' / '随心配有什么' / '有什么料'. '这个' means lastReceipt.
+    // An omitted subject ('含不含猪肉') is this meal only after a receipt exists; otherwise it is a pick.
+    const infoQuery = parseInfoQuery(rest, [...session.mainNames.values(), ...session.packageNames.values()]);
+    if (infoQuery && !(infoQuery.target.ref === 'pick' && infoQuery.target.implicit && !session.lastReceipt)) {
+      return runInfoFlow(session, rest, infoQuery, ui);
+    }
     controller = new AbortController();
     try { await runAgentFlow(session, rest, ui, { signal: controller.signal }); }
     finally { controller = null; }

@@ -321,7 +321,8 @@ export function helpLines(P) {
   const c = (cmd, text) => `${P.cyan(padEnd(cmd, 26))}${text}`;
   return [
     P.bold('直接输入一句话 → Agent 在后台走完：理解需求 → 连接 → 选店 → 读历史避开 → 查券核价 → 双 Agent 挑选，最后只给一个答案'),
-    P.gray('  例：预算30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动'),
+    P.gray('  例：预算30元、避开昨天吃过的主食 @深圳 华强北；想吃麦香鱼；我对花生过敏；有什么活动；这个有牛肉吗 / 随心配里有什么'),
+    P.gray('  一次问一件事，同时问价和别的只回答价格。'),
     P.gray(`  没写的默认：预算 ¥${DEFAULT_INTENT.budgetPerPersonYuan}；门店搜 ${DEFAULT_STORE_SEARCH.label}`),
     P.gray('  /why 查看上一次的完整过程（每一步的结果、两个 Agent 的选择与备选）'),
     P.gray('  输入 / 立即弹出命令面板（按前缀过滤，带说明和关键词）：↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭'),

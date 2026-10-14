@@ -14,6 +14,23 @@ export const DEFAULT_INTENT = Object.freeze({ budgetPerPersonYuan: 25 });
 export const DEFAULT_STORE_SEARCH = Object.freeze({ city: '深圳', keyword: '黄贝岭地铁站', label: '深圳市罗湖区黄贝街道黄贝岭地铁站' });
 const place = (v) => typeof v === 'string' && /^[一-鿿A-Za-z0-9·()（）-]{2,20}$/.test(v.trim()) ? v.trim() : null;
 
+// One list for want/avoid matching and for "有没有牛肉" answers. `name` is what a product
+// title counts as; `ask` is the word the user typed. 吉士 is cheese, so 吉士猪柳蛋麦满分
+// is both 牛肉 and 猪肉 — kept on purpose (narrowing it would change want/avoid).
+export const MEAT_KINDS = Object.freeze([
+  { label: '牛肉', ask: /牛(?!奶)/, name: /牛(?!奶)|巨无霸|吉士|安格斯|1955|大堡口福|肉霸/ },
+  { label: '鸡肉', ask: /鸡/, name: /鸡/ },
+  { label: '鱼', ask: /鱼/, name: /鱼/ },
+  { label: '猪肉', ask: /猪/, name: /猪/ },
+  { label: '虾', ask: /虾/, name: /虾/ },
+]);
+
+// '巨无霸' → ['牛肉']. Order follows MEAT_KINDS. Known miss: 吉士猪柳蛋麦满分 → ['牛肉', '猪肉'].
+export function meatsInName(name) {
+  const text = String(name || '');
+  return MEAT_KINDS.filter((k) => k.name.test(text)).map((k) => k.label);
+}
+
 export function parseLocalIntent(text, mainNames = new Map()) {
   const t = String(text || '').normalize('NFKC').trim(), intent = {};
   let m;
@@ -34,15 +51,9 @@ export function parseLocalIntent(text, mainNames = new Map()) {
   // ('不要麦辣鸡腿汉堡') does not avoid/want the whole meat class — the literal
   // match already handles that one product.
   const tNoNames = [...mainNames.values()].sort((a, b) => b.length - a.length).reduce((s, n) => s.split(n).join(' '), t);
-  const MEAT_PATTERNS = [
-    ['牛(?!奶)', /牛(?!奶)|巨无霸|吉士|安格斯|1955|大堡口福|肉霸/],
-    ['鸡', /鸡/],
-    ['鱼', /鱼/],
-    ['猪', /猪/],
-    ['虾', /虾/],
-  ];
-  for (const [meatSrc, nameRe] of MEAT_PATTERNS) {
-    if (!new RegExp(meatSrc).test(tNoNames)) continue;
+  for (const { ask, name: nameRe } of MEAT_KINDS) {
+    const meatSrc = ask.source;
+    if (!ask.test(tNoNames)) continue;
     const codes = [...mainNames].filter(([, name]) => nameRe.test(name)).map(([code]) => code);
     if (!codes.length) continue;
     if (new RegExp(`${NEGATION}[^，,。；;]*${meatSrc}`).test(tNoNames)) avoidCodes.push(...codes);
@@ -51,8 +62,9 @@ export function parseLocalIntent(text, mainNames = new Map()) {
   // A main named without a negation in front is one the user wants (drives the à la carte vs set upgrade math).
   // Generic meat words add all mains of that meat; avoided mains (literal or generic) never become wanted.
   const wantCodes = [...mainNames].filter(([code, name]) => !avoidCodes.includes(code) && t.includes(name)).map(([code]) => code);
-  for (const [meatSrc, nameRe] of MEAT_PATTERNS) {
-    if (!new RegExp(meatSrc).test(tNoNames)) continue;
+  for (const { ask, name: nameRe } of MEAT_KINDS) {
+    const meatSrc = ask.source;
+    if (!ask.test(tNoNames)) continue;
     if (new RegExp(`${NEGATION}[^，,。；;]*${meatSrc}`).test(tNoNames)) continue;
     for (const [code, name] of mainNames) if (!avoidCodes.includes(code) && !wantCodes.includes(code) && nameRe.test(name)) wantCodes.push(code);
   }
@@ -78,33 +90,145 @@ export const isActivityQuery = (text) => /有(?:什么|啥|哪些)(?:优惠)?活
 const PRICE_ASK = /多少钱|多少元|多少块|几块钱?|几元|什么价|啥价|价格是|价钱|预算(?:要|得|需要)?多少|要多少(?:钱|预算)|最低.{0,6}多少/;
 const PICK_ASK = /推荐|挑一|帮我选|选一|吃什么|吃啥|有什么|有啥|转盘/;
 const FOOD_KINDS = ['汉堡', '堡', '巨无霸', '套餐', '三件套', '麦乐鸡', '鸡块', '鸡翅', '翅', '鸡排', '薯条', '薯饼', '可乐', '雪碧', '派', '卷', '饭', '咖啡', '拿铁', '奶昔', '圆筒', '新地', '麦旋风', '全家桶', '桶', '小食', '饮料', '早餐', '甜品'];
-const FOOD_KIND_RE = new RegExp(FOOD_KINDS.join('|'), 'g');
 // A generic category ('牛肉汉堡', '牛肉汉堡套餐') is a meat + one or two kinds, not a product name.
 const GENERIC_FOOD = /^(?:牛|牛肉|鸡|鸡肉|鱼|猪|虾)(?:汉堡|堡|套餐|三件套|汉堡套餐|堡套餐|汉堡三件套|堡三件套)$/;
 const TRAILING = /(?:吗|呢|吧|啊|了|的|？|\?|!|！|。|，|,)+$/;
+// The food phrase ends at the last food kind in the clause. Walk the modifier back from
+// the kind: the longest suffix that is a real product (or product + 套餐/三件套) or a
+// generic meat + kind. A greedy prefix grabbed sentence noise ('领完优惠券我也吃不了牛肉汉堡'
+// from '...吃不了牛肉汉堡吗？...') and printed it as a product name; the walk-back drops
+// everything before the food phrase. Shared with info questions; price behaviour stays.
+function foodPhrase(part, names) {
+  const products = names instanceof Map ? [...new Set(names.values())] : [...new Set(names || [])];
+  const kinds = [...String(part).matchAll(new RegExp(FOOD_KINDS.join('|'), 'g'))];
+  if (!kinds.length) return null;
+  const kind = kinds[kinds.length - 1], before = part.slice(0, kind.index);
+  for (let len = Math.min(10, before.length); len >= 0; len--) {
+    const candidate = before.slice(before.length - len) + kind[0];
+    if (products.some((n) => candidate === n || candidate === `${n}套餐` || candidate === `${n}三件套`)) return candidate;
+    if (GENERIC_FOOD.test(candidate)) return candidate;
+  }
+  return kind[0];
+}
 export function parsePriceQuery(text, mainNames = new Map()) {
   const t = String(text || '').normalize('NFKC').trim();
   if (!PRICE_ASK.test(t) || PICK_ASK.test(t)) return null;
-  const products = [...new Set(mainNames.values())];
   for (const rawPart of t.split(/[，,。.!！？?；;\s]+/)) {
     const part = rawPart.replace(PRICE_ASK, ' ').replace(TRAILING, '').trim();
     if (!part) continue;
-    // The food phrase ends at the last food kind in the clause. Walk the modifier
-    // back from the kind: the longest suffix that is a real product (or product +
-    // 套餐/三件套) or a generic meat + kind. A greedy prefix grabbed sentence noise
-    // ('领完优惠券我也吃不了牛肉汉堡' from '...吃不了牛肉汉堡吗？...') and printed
-    // it as a product name; the walk-back drops everything before the food phrase.
-    const kinds = [...part.matchAll(FOOD_KIND_RE)];
-    if (!kinds.length) continue;
-    const kind = kinds[kinds.length - 1], before = part.slice(0, kind.index);
-    for (let len = Math.min(10, before.length); len >= 0; len--) {
-      const candidate = before.slice(before.length - len) + kind[0];
-      if (products.some((n) => candidate === n || candidate === `${n}套餐` || candidate === `${n}三件套`)) return { item: candidate };
-      if (GENERIC_FOOD.test(candidate)) return { item: candidate };
-    }
-    return { item: kind[0] };
+    const item = foodPhrase(part, mainNames);
+    if (item) return { item };
   }
   return { item: null };
+}
+
+// Info questions ('这个有牛肉吗', '随心配有什么', '有什么料'). null = not one of these.
+// Price questions are rejected here too, so a unit test can see the priority without the shell.
+// Meat is tested before ingredients, ingredients before composition.
+const INFO_PICK = /推荐|好吃|吃什么|吃啥|想吃|来一?[份个]|帮我选|预算|转盘/;
+const SUBJECT_REJECT = /我要|想|来|推荐|吃/;
+const A_NOT_A = new Set(['有没有', '含不含', '带不带', '是不是']);
+const MEAT_ASK = /^(?<subject>.*?)(?<verb>有没有|含不含|带不带|是不是|没有|不含|不是|不带|有|含|带|是)(?<meat>牛肉|猪肉|鸡肉|鱼肉|羊肉|鸭肉|鹅肉|虾|牛|猪|鸡|鱼|羊|鸭|鹅|肉)(?<de>的)?(?<particle>吗|么|嘛|吧|没|呢)?(?<q>[？?])?$/;
+const ING_ASK = /^(?<subject>.*?)(?<q>有?(?:什么|啥|哪些)(?:料|配料|成分|食材|酱)|(?:配料|成分|食材)(?:是什么|是啥|是哪些|有什么|有啥|有哪些|是|有|什么|啥|哪些)?|放了(?:什么|啥)|加了(?:什么|啥))(?<tail>[吗么嘛吧呢啊呀？?]*)$/;
+const PARTS_HINT = /^(?<subject>.*?)(?<hint>有什么东西|有啥东西|有哪些东西|里面|里头|都有|包括|包含|组成|搭配是|里)(?<rest>.*)$/;
+// 什么|啥|哪些|吗|么|呢|？|? — rest must carry one of these. 有什么东西/有啥东西/有哪些东西 already do.
+const QUESTION_SIGNAL = /什么|啥|哪些|吗|么|呢|？|\?/;
+const WHAT_ASK = /^(?<subject>.+?)有(?:什么|啥|哪些)(?<tail>[吗么嘛吧呢啊呀？?]*)$/;
+const PRODUCT_SUFFIX = /^(?<mod>.+)(?<kind>随心配|套餐|件套|桶|小食盘|双人餐|单人餐)$/;
+// Pronoun, optional measure, optional food kind (FOOD_KINDS, not a hand-written list), optional 里.
+const DEICTIC = new RegExp(`^(?:这|那|这个|那个|它|这份|这餐|这套|这一份|这一餐)(?:个|款|份)?(?:${FOOD_KINDS.map(escape).join('|')})?(?:里面|里头|里)?$`);
+const BARE_KIND = new Set(FOOD_KINDS);
+
+const cleanLead = (s) => String(s || '').replace(/^(?:请问|问一下|想问)/, '').replace(/^那(?=这个|它|这份|这餐|这套|里面)/, '').replace(/的+$/g, '').trim();
+const listNames = (names) => [...new Set((names instanceof Map ? names.values() : names || []))].map((n) => String(n).normalize('NFKC').trim()).filter(Boolean);
+
+function meatLabel(token) {
+  if (token === '肉') return '肉';
+  if (token.startsWith('牛')) return '牛肉';
+  if (token.startsWith('猪')) return '猪肉';
+  if (token.startsWith('鸡')) return '鸡肉';
+  if (token.startsWith('鱼')) return '鱼';
+  if (token === '虾') return '虾';
+  return token.slice(0, 1);
+}
+function confirmOf(verb) {
+  if (verb === '没有' || verb === '不含' || verb === '不是' || verb === '不带') return 'not';
+  if (A_NOT_A.has(verb)) return null;
+  return 'has';
+}
+// A bare food-kind ('汉堡') is what foodPhrase falls back to when the real name is not in
+// the sample list. Keep the longer subject so the store menu can suffix-match it later.
+function itemFromSubject(subject, products) {
+  const s = String(subject || '').trim();
+  if (!s) return s;
+  const phrase = foodPhrase(s, products);
+  if (phrase && !BARE_KIND.has(phrase)) return phrase;
+  let best = '';
+  for (const n of products) if (n.length >= 2 && s.endsWith(n) && n.length > best.length) best = n;
+  return best || s;
+}
+function isConcreteProduct(name, products) {
+  const n = String(name || '').normalize('NFKC').trim();
+  if (!n) return false;
+  if (products.includes(n)) return true;
+  const m = PRODUCT_SUFFIX.exec(n);
+  return Boolean(m?.groups.mod && n.length >= 3);
+}
+// '' → omitted subject (implicit pick). Deictic words → this meal. Anything else → an item name.
+// null → the subject is a meal request ('我想吃…'), so the whole sentence is not an info question.
+function targetOf(subject, products, { hintDeictic = false } = {}) {
+  const raw = cleanLead(subject);
+  if (DEICTIC.test(raw)) return { ref: 'pick', implicit: false };
+  // '麦辣鸡腿堡里有什么料' leaves a trailing 里 on the subject; it is the hint, not part of the name.
+  const s = raw.replace(/(?:里面|里头|里)$/g, '');
+  if (!s || DEICTIC.test(s)) return { ref: 'pick', implicit: s ? false : !hintDeictic };
+  if (SUBJECT_REJECT.test(s)) return null;
+  return { item: itemFromSubject(s, products) };
+}
+
+export function parseInfoQuery(text, names) {
+  const t = String(text || '').normalize('NFKC').trim().replace(/\s+/g, '').replace(/[。.!！~～]+$/g, '');
+  if (!t || PRICE_ASK.test(t) || /不含[^，,。；;]{0,16}的/.test(t)) return null;
+  const products = listNames(names);
+  const meat = MEAT_ASK.exec(t);
+  if (meat) {
+    const { subject, verb, meat: word, de, particle, q } = meat.groups;
+    const signal = A_NOT_A.has(verb) || Boolean(particle) || Boolean(q);
+    // '有牛肉的吗' / '有没有不含牛肉的' are "meals that have/lack beef", which is a pick.
+    if (signal && !(de && !cleanLead(subject)) ) {
+      const target = targetOf(subject, products);
+      if (target) return { kind: 'meat', meat: meatLabel(word), confirm: confirmOf(verb), target };
+    }
+    return null;
+  }
+  const ing = ING_ASK.exec(t);
+  if (ing) {
+    const target = targetOf(ing.groups.subject, products);
+    if (target) return { kind: 'ingredients', target };
+    return null;
+  }
+  if (INFO_PICK.test(t)) return null;
+  const hinted = PARTS_HINT.exec(t);
+  if (hinted) {
+    const { subject, hint, rest } = hinted.groups;
+    // '有什么东西' keeps the question inside the hint, so its rest may be empty. Anything else
+    // ('家里有小孩' / '我都有点饿了') is not a composition question.
+    if (!QUESTION_SIGNAL.test(rest) && !/什么|啥|哪些/.test(hint)) return null;
+    // Every hint needs a subject that is this meal, a real product, or a food kind.
+    // An empty lead ('里面有什么') stays a composition question. '我们都有什么优惠' does not.
+    const lead = cleanLead(subject);
+    const core = lead.replace(/(?:里面|里头|里)$/g, '');
+    if (lead && !DEICTIC.test(lead) && !DEICTIC.test(core) && !isConcreteProduct(core, products) && !FOOD_KINDS.some((k) => core.endsWith(k))) return null;
+    const target = targetOf(subject, products, { hintDeictic: hint === '里面' || hint === '里头' || hint === '里' });
+    if (target) return { kind: 'parts', target };
+    return null;
+  }
+  const what = WHAT_ASK.exec(t);
+  if (what && isConcreteProduct(cleanLead(what.groups.subject), products)) {
+    const target = targetOf(what.groups.subject, products);
+    if (target?.item) return { kind: 'parts', target };
+  }
+  return null;
 }
 
 // Buy intent on the current pick: '就吃这个了' and close variants → { delivery, takeWay } ('堂食' / '外带' / null),

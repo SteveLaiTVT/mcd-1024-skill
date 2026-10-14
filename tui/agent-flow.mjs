@@ -9,6 +9,7 @@ import { MCPError } from '../web/mcp-client.mjs';
 import { DeepSeekError } from '../web/deepseek-client.mjs';
 import { calendarContext } from '../web/agent-context.mjs';
 import { parseLocalIntent, agentIntent, mergeIntent, DEFAULT_STORE_SEARCH } from './intent.mjs';
+import { answerMeat, answerParts, answerIngredients, compositionNames, renderInfoAnswer } from './info.mjs';
 import { TuiError } from './session.mjs';
 import { renderIntent, renderReport, renderAgentResult, renderPick, renderRecentEats, renderCoupons, renderAnswer, pickReason } from './render.mjs';
 import { maybeReceipt } from './receipt.mjs';
@@ -29,17 +30,21 @@ async function selectOpenStore(session, target) {
   return { open, stores };
 }
 
+// Connect if needed, then search the default area when the sentence names no store and none is selected.
+async function ensureStore(session, task, text) {
+  if (session.demo) return;
+  if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
+  const local = parseLocalIntent(text, session.mainNames);
+  const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
+  if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
+}
+
 // '牛肉堡多少钱' / '最低预算要多少钱': a direct lookup in the store's menu plus calculate-price — not the pick flow,
 // which answers a different question and would report '预算内没有候选'. Read-only: query-meals, query-meal-detail, calculate-price.
 export async function runPriceFlow(session, text, query, ui) {
   const P = ui.palette, ask = query.item || '最便宜的餐', task = ui.begin(`查价：${ask}`);
   try {
-    if (!session.demo) {
-      if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
-      const local = parseLocalIntent(text, session.mainNames);
-      const target = local.city && local.keyword ? { city: local.city, keyword: local.keyword } : session.store ? null : { ...DEFAULT_STORE_SEARCH, isDefault: true };
-      if (target) { task.progress(`选择门店 · ${target.city} ${target.keyword}`); await selectOpenStore(session, target); }
-    }
+    await ensureStore(session, task, text);
     const result = await session.priceLookup(query.item, (p) => task.progress(p.text));
     task.done();
     session.lastDetails = { query: text, lines: [
@@ -53,6 +58,97 @@ export async function runPriceFlow(session, text, query, ui) {
     task.done();
     ui.result('没查到价格', [`${message(e)}`, P.gray('/store 换一家店，或稍后再问。')], 'yellow');
     return { status: 'failed', error: message(e) };
+  }
+}
+
+const NO_PICK_INFO = '还没有挑出这一餐。先说"预算 30 来一份"，或直接问具体的，比如"巨无霸有牛肉吗"';
+const mergeInfoDetails = (details) => {
+  if (!details?.length) return null;
+  if (details.length === 1) return details[0];
+  return { code: details.map((d) => d.code).join('+'), name: details.map((d) => d.name).filter(Boolean).join('、'),
+    plain: false, rounds: details.flatMap((d) => d.rounds || []),
+    extras: details.flatMap((d) => (d.extras || []).map((n) => ({ where: d.name, names: [n] }))) };
+};
+const meatNamesOf = (detail, fallback) => [...new Set([fallback, detail?.name, ...compositionNames(detail)].filter(Boolean))];
+
+// '这个有牛肉吗' / '随心配有什么' / '有什么料'. Same skeleton as runPriceFlow, but it never
+// writes lastDetails, never prints a receipt, and never records a pick. '这个' reads lastReceipt,
+// not lastPick (invalidate() clears lastPick; the receipt survives).
+export async function runInfoFlow(session, text, query, ui) {
+  const P = ui.palette, storeNameOf = () => session.store?.storeName || '';
+  const label = query.kind === 'meat' ? `有没有${query.meat}` : query.kind === 'ingredients' ? '有什么配料' : '套餐里有什么';
+  const task = ui.begin(`问询：${label}`);
+  const show = (title, answer, tone) => ui.result(title, renderInfoAnswer(answer, P, { storeName: storeNameOf(), allergies: session.allergies }), tone);
+  try {
+    if (query.target.ref === 'pick') {
+      const receipt = session.lastReceipt;
+      if (!receipt) {
+        if (!query.target.implicit) ui.info(NO_PICK_INFO);
+        return { status: 'no-pick' };
+      }
+      const partNames = (receipt.parts || []).map((p) => p.name).filter(Boolean);
+      let detail = null, detailError = null;
+      if (!session.demo && receipt.buy && query.kind !== 'meat') {
+        try {
+          if (!session.connected) { task.progress('连接麦当劳 MCP …'); await session.connect(); }
+          const got = await session.pickDetail((p) => task.progress(p.text));
+          detail = mergeInfoDetails(got.details); detailError = got.error;
+        } catch (e) { detailError = message(e); }
+      }
+      if (query.kind === 'meat') {
+        const answer = answerMeat({ names: partNames, meat: query.meat, confirm: query.confirm });
+        show(`有没有${query.meat}`, answer);
+        return { status: 'answered', answer };
+      }
+      if (query.kind === 'parts') {
+        const answer = answerParts({ name: receipt.title, parts: receipt.parts, detail, detailError, storeName: receipt.storeName });
+        show(receipt.title ? `${receipt.title}里有什么` : '套餐里有什么', answer);
+        return { status: 'answered', answer };
+      }
+      const answer = answerIngredients({ name: receipt.title, detail, parts: receipt.parts, names: partNames, sample: session.demo && !detail, detailError });
+      show(receipt.title ? `${receipt.title}的配料` : '配料', answer);
+      return { status: 'answered', answer };
+    }
+
+    await ensureStore(session, task, text);
+    const looked = await session.itemDetail(query.target.item, (p) => task.progress(p.text));
+    if (!looked.matches.length) {
+      const answer = { kind: 'missing', item: query.target.item, items: looked.items };
+      show('菜单里没找到', answer, 'yellow');
+      return { status: 'not-found', answer };
+    }
+    if (looked.error) {
+      const answer = { kind: 'error', error: looked.error };
+      show('接口出错', answer, 'yellow');
+      return { status: 'failed', error: looked.error, answer };
+    }
+    const detail = looked.detail, hitName = looked.matches[0].name;
+    if (looked.sample && !detail && query.kind !== 'meat') {
+      const answer = { kind: 'no-sample', name: hitName, names: [hitName] };
+      show('没有餐品详情', answer, 'yellow');
+      return { status: 'answered', answer };
+    }
+    const names = meatNamesOf(detail, hitName);
+    if (query.kind === 'meat') {
+      const answer = answerMeat({ names, meat: query.meat, confirm: query.confirm });
+      const lines = renderInfoAnswer(answer, P, { storeName: storeNameOf(), allergies: session.allergies });
+      if (looked.sample && !detail) lines.unshift('样本模式没有餐品详情；连接后再问。');
+      ui.result(`有没有${query.meat}`, lines);
+      return { status: 'answered', answer };
+    }
+    if (query.kind === 'parts') {
+      const answer = answerParts({ name: detail?.name || hitName, detail, storeName: storeNameOf() });
+      show(answer.plain ? '配料' : `${answer.name}里有什么`, answer);
+      return { status: 'answered', answer };
+    }
+    const answer = answerIngredients({ name: detail?.name || hitName, detail, names });
+    show(`${detail?.name || hitName}的配料`, answer);
+    return { status: 'answered', answer };
+  } catch (e) {
+    ui.result('没查到', [message(e)], 'yellow');
+    return { status: 'failed', error: message(e) };
+  } finally {
+    task.done();
   }
 }
 
