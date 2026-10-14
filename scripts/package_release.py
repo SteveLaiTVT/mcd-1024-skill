@@ -55,7 +55,7 @@ INSTALL_NOTE = "安装说明.txt"
 
 # 仅静态体验页（GitHub Pages）额外包含的页面：终端版小票二维码打开的选餐卡片。
 STATIC_PAGES = {
-    "receipt/index.html": ("web", "receipt-card.html"),
+    "receipt/index.html": ("static", "receipt-card.html"),
 }
 
 # 不允许出现在发布件里的私有文件：目录/文件名、后缀、路径片段。

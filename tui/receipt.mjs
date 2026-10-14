@@ -6,10 +6,10 @@ import { money, padEnd, textWidth } from './ansi.mjs';
 import { cardUrl, chinaTime, shortStore } from './card.mjs';
 
 export { chinaTime, shortStore };
-export const RECEIPT_ODDS = 1 / 3;
+
 export const QR_LABEL = '扫码查看套餐卡片';
 export const CARD_NOTE = '卡片是 GitHub Pages 上的静态页，数据只在链接 # 之后，不上传；不是付款码。';
-export const shouldPrintReceipt = (random = Math.random) => random() < RECEIPT_ODDS;
+
 export const RECEIPT_WIDTH = 40;
 const WIDTH = RECEIPT_WIDTH;
 
@@ -58,13 +58,7 @@ export function renderReceipt(r, P, { color = P.enabled, columns, note = '' } = 
     P.bold('想买就说 就吃这个了，下单后扫码或在麦当劳 App 付款'), dotted];
 }
 
-export function printReceipt(ui, receipt, { auto = false, note = '' } = {}) {
+export function printReceipt(ui, receipt, { note = '' } = {}) {
   ui.write('');
-  if (auto) ui.write(ui.palette.gray('（随手掉落一张小票，大约三次一张；/receipt 随时查看最近一份）'));
   renderReceipt(receipt, ui.palette, { columns: ui.columns?.(), note }).forEach((line) => ui.write(line));
-}
-
-// About one in three picks; `session.random` is injectable so tests stay deterministic.
-export function maybeReceipt(ui, session) {
-  if (session.lastReceipt && shouldPrintReceipt(session.random)) printReceipt(ui, session.lastReceipt, { auto: true });
 }

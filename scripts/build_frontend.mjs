@@ -10,15 +10,20 @@ const dataFiles = ['plan-recipes.json', 'meal-plans.json', 'coupon-offers.json',
 for (const kind of ['extension', 'static']) {
   const output = path.join(root, 'output', `mcd-wheel-${kind}`);
   await mkdir(path.join(output, 'data'), { recursive: true });
-  for (const name of assets) await copyFile(path.join(root, 'web', name), path.join(output, name));
+  for (const name of assets) {
+    const from = path.join(root, 'web', name);
+    try { await copyFile(from, path.join(output, name)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  }
   for (const name of dataFiles) await copyFile(path.join(root, 'data', name), path.join(output, 'data', name));
   if (kind === 'static') {
     // Meal-card page for the terminal receipt QR; GitHub Pages serves it at …/mcd-1024-skill/receipt/ (tui/card.mjs CARD_BASE_URL).
     await mkdir(path.join(output, 'receipt'), { recursive: true });
-    await copyFile(path.join(root, 'web', 'receipt-card.html'), path.join(output, 'receipt', 'index.html'));
+    await copyFile(path.join(root, 'static', 'receipt-card.html'), path.join(output, 'receipt', 'index.html'));
   }
   if (kind === 'extension') {
-    for (const name of ['manifest.json', 'launcher.js']) await copyFile(path.join(root, 'web', name), path.join(output, name));
+    for (const name of ['manifest.json', 'launcher.js']) {
+      try { await copyFile(path.join(root, 'web', name), path.join(output, name)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    }
     await copyFile(path.join(root, 'docs', 'frontend-architecture.md'), path.join(output, '接入说明.md'));
     await copyFile(path.join(root, 'docs', 'meal-agents.md'), path.join(output, 'AI搭子说明.md'));
     await writeFile(path.join(output, '安装说明.txt'), `麦麦饱饱盘 · 纯前端浏览器扩展 ${version}

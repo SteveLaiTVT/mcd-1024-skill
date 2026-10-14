@@ -14,12 +14,12 @@ import { writePrivateJson } from './allergy.mjs';
 import { money } from './ansi.mjs';
 import { chinaTime } from './card.mjs';
 
-export const CART_NOTE = '购物车只是本地清单，不是订单；要下单请选好一餐后说 就吃这个了。';
-export const EMPTY_GRAPH = '还没有订单提交，用 /commit -m ... 创建';
-export const EMPTY_CART = '购物车是空的，用 /commit 再 /push 加入';
-export const NO_PICK = '先选一餐，再 /commit';
-export const COMMIT_USAGE = '用法：/commit -m "备注"';
-export const CART_USAGE = '用法：/cart · /cart rm <hash> · /cart clear';
+export const CART_NOTE = '购物车只是本地暂存，不是订单；要下单请选好一餐后说 就吃这个了。';
+export const EMPTY_GRAPH = '还没有暂存记录。';
+export const EMPTY_CART = '购物车是空的。选好一餐后 /cart add 放进来（可选，不下单）。';
+export const NO_PICK = '先选一餐，再 /cart add';
+export const COMMIT_USAGE = '用法：/cart add';
+export const CART_USAGE = '用法：/cart [add|rm 序号|clear]';
 export const NOTE_MAX = 40;
 export const defaultOrdersPath = (home = homedir()) => join(home, '.config', 'mcd-tui', 'orders.json');
 
@@ -126,11 +126,11 @@ export function renderCart(state, P) {
   if (!cart.length) return [P.gray(EMPTY_CART), '', P.yellow(CART_NOTE)];
   const lines = [];
   cart.forEach((c, i) => {
-    lines.push(`${String(i + 1).padStart(2)}. ${commitLine(c, P)}`);
+    lines.push(`${String(i + 1).padStart(2)}. ${P.bold(c.title)}  ${money(c.priceFen)}${c.sample ? P.gray('(样本价)') : ''}${c.note ? `  ${P.cyan(`备注：${c.note}`)}` : ''}`);
     lines.push(P.gray(`    ${c.parts.map((p) => `${p.name}×${p.quantity}`).join('、')} · ${c.storeName} · 选餐 ${chinaTime(c.pickedAt).slice(5)}`));
   });
   const sample = cart.some((c) => c.sample);
   lines.push('', `${P.bold(`共 ${cart.length} 单`)} · 合计 ${P.bold(money(cartTotal(cart)))}${sample ? P.gray('（含历史样本价，实际以官方为准）') : ''}`,
-    P.gray('/cart rm <hash> 移出一单（回到未 push，历史保留）· /cart clear 清空（需输入 yes）'), '', P.bold(P.yellow(CART_NOTE)));
+    P.gray('/cart rm 序号 移出一单 · /cart clear 清空（需输入 yes）'), '', P.bold(P.yellow(CART_NOTE)));
   return lines;
 }

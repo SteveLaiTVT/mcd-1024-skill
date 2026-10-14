@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { historyTime, chinaDay, shiftDay, normalizeHistory, historyCalendar, readHistory, demoHistory } from '../web/order-history.mjs';
+import { historyTime, chinaDay, shiftDay, normalizeHistory, historyCalendar, readHistory, demoHistory } from '../core/history.mjs';
 
 const now = '2026-10-10T18:00:00+08:00';
 const order = (overrides = {}) => ({ orderId: 'private-order', orderStatus: '订单已完成', createTime: '2026-10-09 12:30:00', storeName: '测试餐厅',

@@ -1,9 +1,9 @@
 // The store's actual menu (query-meals): a fallback when no template prices at this store, direct
 // price questions ('牛肉堡多少钱'), and the real reason an answer came back empty. Prices shown as
 // quotes come from calculate-price; menu prices are labelled 菜单价 and never treated as a quote.
-import { quoteBest, menuItemCart } from '../web/meal-engine.mjs';
+import { quoteBest, menuItemCart } from '../core/pricing.mjs';
 import { money } from './ansi.mjs';
-import { MEAT_KINDS } from './intent.mjs';
+import { MEAT_KINDS } from '../core/menu.mjs';
 import { isDrink } from './render.mjs';
 
 export const MENU_FALLBACK_LIMIT = 6;

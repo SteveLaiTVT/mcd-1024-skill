@@ -2,7 +2,7 @@
 // The MCP server has no tool that registers a user for an activity, so the only
 // MCP route is claiming a matching claimable coupon (auto-bind-coupons, after an
 // explicit typed yes). Everything else is information-only with the official path.
-import { timeCondition, couponTimeStatus } from '../web/meal-engine.mjs';
+import { timeCondition, couponTimeStatus } from '../core/coupons.mjs';
 
 const TYPES = ['活动', '神秘活动', '优惠券', '品鉴会', '活动文章', '麦麦省', '派对'];
 export const OFFICIAL_PATH = '在麦当劳官方 App 或微信小程序的活动页查看并按官方规则参与（入口以官方为准）';

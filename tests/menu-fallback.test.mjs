@@ -5,30 +5,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parsePriceQuery } from '../tui/intent.mjs';
 import { emptyCause, renderEmpty } from '../tui/menu.mjs';
 import { createPalette } from '../tui/ansi.mjs';
 import { TuiSession } from '../tui/session.mjs';
 
 const P = createPalette(false);
 const json = async (name) => JSON.parse(await readFile(new URL(`../data/${name}.json`, import.meta.url), 'utf8'));
-
-test('price questions route to a direct lookup, pick questions do not', () => {
-  assert.equal(parsePriceQuery('我想吃牛肉堡，最低的预算要多少钱')?.item, '牛肉堡');
-  assert.equal(parsePriceQuery('牛肉堡多少钱')?.item, '牛肉堡');
-  assert.equal(parsePriceQuery('巨无霸多少钱')?.item, '巨无霸');
-  assert.equal(parsePriceQuery('有什么不错的套餐推荐一下'), null, 'a recommendation is a pick, not a price question');
-  assert.equal(parsePriceQuery('现在有什么能吃的'), null, 'an open question is a pick, not a price question');
-  assert.equal(parsePriceQuery('最低预算 40 看看'), null, 'setting a budget is not asking a price');
-  assert.equal(parsePriceQuery('那我这个预算有什么好的套餐推荐吗'), null);
-});
-
-test('price question with sentence noise extracts only the food phrase, never the sentence', () => {
-  assert.equal(parsePriceQuery('领完优惠券我也吃不了牛肉汉堡吗？我想搞个套餐的话多少钱')?.item, '牛肉汉堡');
-  assert.equal(parsePriceQuery('双层吉士汉堡多少钱', new Map([['B2', '双层吉士汉堡']]))?.item, '双层吉士汉堡');
-  assert.equal(parsePriceQuery('大堡口福三件套多少钱', new Map([['B4', '大堡口福']]))?.item, '大堡口福三件套');
-  assert.equal(parsePriceQuery('牛肉汉堡套餐多少钱')?.item, '牛肉汉堡套餐');
-});
 
 test('emptyCause names the real cause; only budget may suggest raising the budget', () => {
   const base = { quotedPlans: [], failedPlans: [], excludedPlans: [], request: { people: 1, budgetPerPersonFen: 2500 }, menu: { ok: true, items: [] } };

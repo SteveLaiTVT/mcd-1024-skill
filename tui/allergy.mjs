@@ -56,12 +56,7 @@ export function parseAllergyStatement(text) {
   return found ? { allergens: [...new Set(allergens)], rest: rest.join('，') } : null;
 }
 
-// Text that may go to the DeepSeek intent agent: allergy clauses and recorded allergen names removed.
-export function stripAllergyText(text, allergies = []) {
-  let out = String(text || '').normalize('NFKC').split(/[，,。；;！!？?\n]+/).map((c) => c.trim()).filter((c) => c && !/过敏|忌口|不耐受/.test(c)).join('，');
-  for (const a of allergies) out = out.split(a).join('');
-  return out;
-}
+export { stripAllergyText } from '../core/memory.mjs';
 
 // Item names one plan exposes: title plus every package and part name.
 const namesOf = (plan) => [plan.title, ...(plan.packages || []).map((p) => p.name), ...(plan.parts || []).map((p) => p.name)];

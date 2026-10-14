@@ -2,7 +2,7 @@
 // Meat is judged from product names only. Ingredients come only from modification options
 // that can be removed (selectedQuantity > 0 and an unselectedKey); that list is not a recipe.
 import { money } from './ansi.mjs';
-import { MEAT_KINDS, meatsInName } from './intent.mjs';
+import { MEAT_KINDS, meatsInName } from '../core/menu.mjs';
 import { matchMenu } from './menu.mjs';
 
 const norm = (s) => String(s || '').normalize('NFKC').replace(/[\s™®·()（）\n]/g, '');
