@@ -275,7 +275,11 @@ export function createExecutor({ session, ui, ask, message }) {
     let intent;
     try {
       step.progress('问模型…');
-      intent = await decide({ session, text: stripped, llm, signal, runTool: (name, args, opts) => session.runTool(name, args, opts) });
+      // The 10s budget is for the LLM reasoning loop only; the quote phase below
+      // gets the outer (60s) budget. The user asked for a bounded LLM, not a
+      // bounded data pipeline — 40-50 MCP calls cannot fit in 10s.
+      const llmSignal = signal ? AbortSignal.any([AbortSignal.timeout(10000), signal]) : AbortSignal.timeout(10000);
+      intent = await decide({ session, text: stripped, llm, signal: llmSignal, runTool: (name, args, opts) => session.runTool(name, args, opts) });
       step.done();
     } catch (e) { step.fail(message(e)); return; }
     return runIntent(intent, { query: stripped, signal });

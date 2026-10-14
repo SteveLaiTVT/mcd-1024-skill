@@ -255,7 +255,7 @@ export function createShell({ session, ui, ask, quit = () => {}, autoConnect = t
       if (!rest) return;
       ui.info('过敏信息已在本地记录，其余内容不含过敏原。');
     }
-    const timeout = AbortSignal.timeout(10000);
+    const timeout = AbortSignal.timeout(60000);
     controller = new AbortController();
     const signal = AbortSignal.any([timeout, controller.signal]);
     try { await executor.handleText(rest, { signal }); }

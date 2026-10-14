@@ -209,10 +209,18 @@ function benefitRows(offers, owned, store, usable, skipped, entries, calendarCom
 }
 export async function inspectBenefits(client, context, onProgress = () => {}, { signal } = {}) {
   onProgress({ step: 0, text: '正在查可领券、券包和门店范围…' });
-  const now = dateValue((await client.call('now-time-info', {}, { signal })).data.datetime);
-  const offers = publicOffers((await client.call('available-coupons', {}, { signal })).data);
-  const { owned, complete } = await wallet(client, { signal });
-  const store = (await client.call('query-store-coupons', pick(context, ['storeCode', 'orderType', 'beType']), { signal })).data;
+  // The four reads are independent: run them together instead of sequentially.
+  // (wallet() pages internally, but that is inherent to pagination.)
+  const [nowRes, offersRes, walletRes, storeRes] = await Promise.all([
+    client.call('now-time-info', {}, { signal }),
+    client.call('available-coupons', {}, { signal }),
+    wallet(client, { signal }),
+    client.call('query-store-coupons', pick(context, ['storeCode', 'orderType', 'beType']), { signal }),
+  ]);
+  const now = dateValue(nowRes.data.datetime);
+  const offers = publicOffers(offersRes.data);
+  const { owned, complete } = walletRes;
+  const store = storeRes.data;
   requireValue(Array.isArray(store), '门店优惠范围未确认');
   const initial = eligibleCoupons(owned, store, now);
   onProgress({ step: 1, text: '正在核实活动、有效期和用券时段…' });
